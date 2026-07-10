@@ -9,6 +9,7 @@ Handles user accounts:
     and promote/demote staff <-> admin.
 """
 import os
+import requests
 import random
 from datetime import datetime, timedelta
 
@@ -34,12 +35,21 @@ def _send_otp_email(user):
     db.session.commit()
 
     try:
-        msg = Message(
-            subject="Your verification code",
-            recipients=[user.email],
-            html=f"<p>Hi {user.full_name},</p><p>Your verification code is: <strong>{code}</strong></p><p>This code expires in 15 minutes.</p>"
+        response = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {os.environ.get('RESEND_API_KEY')}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": "onboarding@resend.dev",
+                "to": [user.email],
+                "subject": "Your verification code",
+                "html": f"<p>Hi {user.full_name},</p><p>Your verification code is: <strong>{code}</strong></p><p>This code expires in 15 minutes.</p>",
+            },
+            timeout=10,
         )
-        mail.send(msg)
+        response.raise_for_status()
     except Exception as e:
         print(f"Failed to send OTP email to {user.email}: {e}")
 
