@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Verify Email{% endblock %}
+{% block content %}
+<div class="login-box card">
+  <h1>Verify your email</h1>
+  <p style="color:var(--muted);font-size:0.88rem;">
+    We sent a 6-digit code to <strong>{{ user.email }}</strong>. Enter it below.
+  </p>
+  <form method="POST">
+    {{ form.hidden_tag() }}
+    <div class="form-group">
+      {{ form.otp_code.label }}
+      {{ form.otp_code(maxlength=6, autofocus=true) }}
+    </div>
+    <div class="form-actions">
+      {{ form.submit(class="btn") }}
+    </div>
+  </form>
+  <p style="margin-top:14px;font-size:0.85rem;">
+    Didn't get it? <a href="{{ url_for('auth.resend_otp', user_id=user.id) }}">Resend code</a>
+  </p>
+</div>
+{% endblock %}

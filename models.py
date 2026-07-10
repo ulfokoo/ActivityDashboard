@@ -18,6 +18,11 @@ class User(UserMixin, db.Model):
 
     # "admin" or "staff"
     role = db.Column(db.String(20), nullable=False, default="staff")
+    position = db.Column(db.String(120))
+    department = db.Column(db.String(120))
+    otp_code = db.Column(db.String(6))
+    otp_expires_at = db.Column(db.DateTime)
+    email_verified = db.Column(db.Boolean, default=False)
 
     # Self-registered accounts start unapproved and can't log in until an
     # admin approves them.

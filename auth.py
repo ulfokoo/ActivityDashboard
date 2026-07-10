@@ -8,6 +8,11 @@ Handles user accounts:
   - An admin-only "Manage Users" screen to approve/reject pending accounts
     and promote/demote staff <-> admin.
 """
+import random
+from datetime import datetime, timedelta
+
+from flask_mail import Message
+from extensions import mail
 from functools import wraps
 
 from flask import Blueprint, render_template, redirect, url_for, flash, request
@@ -16,9 +21,29 @@ from flask_login import (
 )
 
 from models import db, User
-from forms import RegisterForm, LoginForm
+from forms import RegisterForm, LoginForm, OTPForm
 
 auth_bp = Blueprint("auth", __name__)
+
+def _send_otp_email(user):
+    """Generate a fresh 6-digit code, save it to the user, and email it."""
+    code = f"{random.randint(0, 999999):06d}"
+    user.otp_code = code
+    user.otp_expires_at = datetime.utcnow() + timedelta(minutes=15)
+    db.session.commit()
+
+    msg = Message(
+        subject="Your verification code",
+        recipients=[user.email],
+        body=(
+            f"Hi {user.full_name},\n\n"
+            f"Your verification code is: {code}\n"
+            f"This code expires in 15 minutes.\n\n"
+            f"If you didn't request this, you can ignore this email."
+        ),
+    )
+    mail.send(msg)
+
 
 
 def admin_required(view_func):
@@ -64,15 +89,48 @@ def register():
         db.session.add(user)
         db.session.commit()
 
-        flash(
-            "Account created. An administrator needs to approve your "
-            "account before you can log in.",
-            "success",
-        )
-        return redirect(url_for("auth.login"))
+        _send_otp_email(user)
+        flash("Account created! We emailed you a 6-digit code — enter it below to verify your email.", "success")
+        return redirect(url_for("auth.verify_email", user_id=user.id))
 
     return render_template("auth/register.html", form=form)
 
+
+@auth_bp.route("/verify-email/<int:user_id>", methods=["GET", "POST"])
+def verify_email(user_id):
+    user = User.query.get_or_404(user_id)
+
+    if user.email_verified:
+        flash("Email already verified — you can log in once an admin approves your account.", "info")
+        return redirect(url_for("auth.login"))
+
+    form = OTPForm()
+    if form.validate_on_submit():
+        entered = form.otp_code.data.strip()
+
+        if not user.otp_code or not user.otp_expires_at or datetime.utcnow() > user.otp_expires_at:
+            flash("That code has expired. Click 'Resend code' below to get a new one.", "danger")
+        elif entered != user.otp_code:
+            flash("Incorrect code. Please try again.", "danger")
+        else:
+            user.email_verified = True
+            user.otp_code = None
+            user.otp_expires_at = None
+            db.session.commit()
+            flash("Email verified! An admin will review and approve your account before you can log in.", "success")
+            return redirect(url_for("auth.login"))
+
+    return render_template("auth/verify_email.html", user=user, form=form)
+
+
+@auth_bp.route("/verify-email/<int:user_id>/resend")
+def resend_otp(user_id):
+    user = User.query.get_or_404(user_id)
+    if user.email_verified:
+        return redirect(url_for("auth.login"))
+    _send_otp_email(user)
+    flash("A new code has been sent to your email.", "info")
+    return redirect(url_for("auth.verify_email", user_id=user.id))
 
 @auth_bp.route("/login", methods=["GET", "POST"])
 def login():
@@ -85,6 +143,9 @@ def login():
 
         if user is None or not user.check_password(form.password.data):
             flash("Incorrect email or password.", "danger")
+        elif not user.email_verified:
+            flash("Please verify your email before logging in.", "danger")
+            return redirect(url_for("auth.verify_email", user_id=user.id))
         elif not user.is_approved:
             flash(
                 "Your account is still pending admin approval. "

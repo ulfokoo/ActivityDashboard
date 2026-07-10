@@ -85,3 +85,6 @@ class TargetForm(FlaskForm):
     target_count = FloatField("Target (Count)", validators=[Optional()], default=0)
     target_etb = FloatField("Target (ETB)", validators=[Optional()], default=0)
     submit = SubmitField("Save Target")
+class OTPForm(FlaskForm):
+    otp_code = StringField("Verification Code", validators=[DataRequired(), Length(min=6, max=6)])
+    submit = SubmitField("Verify")

@@ -9,6 +9,7 @@ import config
 from models import db, Activity, Target, User, ServiceArea, calc_quarter, calc_fiscal_year
 from forms import ActivityForm, TargetForm
 from auth import auth_bp, admin_required
+from extensions import mail
 
 login_manager = LoginManager()
 login_manager.login_view = "auth.login"
@@ -28,6 +29,7 @@ def create_app():
 
     db.init_app(app)
     login_manager.init_app(app)
+    mail.init_app(app)
     app.register_blueprint(auth_bp)
 
     with app.app_context():
