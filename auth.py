@@ -34,6 +34,8 @@ def _send_otp_email(user):
     user.otp_expires_at = datetime.utcnow() + timedelta(minutes=15)
     db.session.commit()
 
+    return  # TODO: re-enable email sending once mail issue is fixed
+
     try:
         response = requests.post(
             "https://api.resend.com/emails",
@@ -102,9 +104,12 @@ def register():
         db.session.add(user)
         db.session.commit()
 
-        _send_otp_email(user)
-        flash("Account created! We emailed you a 6-digit code — enter it below to verify your email.", "success")
-        return redirect(url_for("auth.verify_email", user_id=user.id))
+        # TEMP: skip OTP verification
+        user.email_verified = True
+        db.session.commit()
+
+        flash("Account created! Waiting for admin approval.", "success")
+        return redirect(url_for("auth.login"))
 
     return render_template("auth/register.html", form=form)
 
