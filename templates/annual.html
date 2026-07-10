@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Annual Dashboard{% endblock %}
+{% block content %}
+<h1>Annual Dashboard</h1>
+
+<form class="filters" method="get">
+  <div>
+    <label>Select Year (Fiscal)</label>
+    <select name="year" onchange="this.form.submit()">
+      {% for y in years %}<option value="{{ y }}" {% if year==y %}selected{% endif %}>{{ y }}</option>{% endfor %}
+    </select>
+  </div>
+</form>
+
+<div class="cards">
+  <div class="card"><div class="value">{{ summary.total }}</div><div class="label">Total Activities (Year)</div></div>
+  <div class="card completed"><div class="value">{{ summary.completed }}</div><div class="label">Completed</div></div>
+  <div class="card ongoing"><div class="value">{{ summary.ongoing }}</div><div class="label">Ongoing</div></div>
+  <div class="card delayed"><div class="value">{{ summary.delayed }}</div><div class="label">Delayed</div></div>
+  <div class="card"><div class="value">{{ "%.0f"|format(summary.total_etb) }}</div><div class="label">Total Financial Result (ETB)</div></div>
+</div>
+
+<h2 class="section-title">Activity Count by Service Area x Month — FY{{ year }}</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Service Area</th>
+      {% for m in fiscal_months %}<th>{{ m[:3] }}</th>{% endfor %}
+      <th>Total</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in matrix %}
+    <tr>
+      <td>{{ row.service_area }}</td>
+      {% for c in row.months %}<td>{{ c }}</td>{% endfor %}
+      <td><strong>{{ row.total }}</strong></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

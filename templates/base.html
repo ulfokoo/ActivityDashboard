@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Coop Bank Activity Tracker{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <div class="tagline-corner">
+    Simple Tracking, Better Insights<br>
+    Fast, Clear, Reliable — see where every service area stands.
+  </div>
+  <div class="brand">Activity Tracker</div>
+  <nav>
+    {% if current_user.is_authenticated %}
+      <a href="{{ url_for('dashboard') }}">Dashboard</a>
+      <a href="{{ url_for('activity_list') }}">Activity Log</a>
+      <a href="{{ url_for('monthly_dashboard') }}">Monthly</a>
+      <a href="{{ url_for('quarterly_dashboard') }}">Quarterly</a>
+      <a href="{{ url_for('quarterly_target') }}">Target vs Achievement</a>
+      <a href="{{ url_for('annual_dashboard') }}">Annual</a>
+      {% if current_user.is_admin %}
+        <a href="{{ url_for('targets') }}">Targets</a>
+        <a href="{{ url_for('auth.manage_users') }}">Manage Users</a>
+        <a href="{{ url_for('service_area_list') }}">Service Areas</a>
+      {% endif %}
+      <a class="btn-highlight" href="{{ url_for('auth.logout') }}">Log Out ({{ current_user.full_name }})</a>
+    {% else %}
+      <a href="{{ url_for('auth.login') }}">Log In</a>
+      <a href="{{ url_for('auth.register') }}">Register</a>
+    {% endif %}
+  </nav>
+</header>
+</section>
+
+  <main class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

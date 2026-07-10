@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>{{ title }}</h1>
+
+<form method="post" class="form-grid" novalidate>
+  {{ form.hidden_tag() }}
+
+  <div>{{ form.date.label }} {{ form.date(type="date") }}</div>
+  <div>{{ form.service_area.label }} {{ form.service_area() }}</div>
+
+  <div class="full">{{ form.specific_activity.label }} {{ form.specific_activity() }}</div>
+  <div class="full">{{ form.description.label }} {{ form.description(rows=3) }}</div>
+
+  <div>{{ form.where_location.label }} {{ form.where_location() }}</div>
+  <div>{{ form.whom.label }} {{ form.whom() }}</div>
+
+  <div>{{ form.engagement_type.label }} {{ form.engagement_type() }}</div>
+  <div>{{ form.doc_link.label }} {{ form.doc_link() }}</div>
+
+  <div class="full">{{ form.result_outcome.label }} {{ form.result_outcome(rows=2) }}</div>
+  <div>{{ form.financial_result.label }} {{ form.financial_result() }}</div>
+  <div>{{ form.status.label }} {{ form.status() }}</div>
+
+  <div class="full">{{ form.future_plan.label }} {{ form.future_plan(rows=2) }}</div>
+  <div>{{ form.responsible_org.label }} {{ form.responsible_org() }}</div>
+  <div class="full">{{ form.remarks.label }} {{ form.remarks(rows=2) }}</div>
+
+  <div class="form-actions">
+    {{ form.submit(class="btn") }}
+    <a class="btn btn-secondary" href="{{ url_for('activity_list') }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

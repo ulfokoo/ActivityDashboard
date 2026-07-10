@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Service Areas{% endblock %}
+{% block content %}
+
+<h1>Manage Service Areas</h1>
+<p style="color: #52606d;">Add, rename, activate/deactivate, or delete the Service Area categories used across the app.</p>
+
+<form method="POST" action="{{ url_for('service_area_add') }}" style="margin-bottom: 20px;">
+    <input type="text" name="name" placeholder="New service area name" required>
+    <button type="submit">Add</button>
+</form>
+
+<table style="margin-bottom: 20px;">
+    <thead>
+        <tr><th>Name</th><th>Status</th><th>Actions</th></tr>
+    </thead>
+    <tbody>
+        {% for area in areas %}
+        <tr>
+            <td>
+                <form method="POST" action="{{ url_for('service_area_rename', area_id=area.id) }}" style="display: flex; gap: 8px;">
+                    <input type="text" name="name" value="{{ area.name }}">
+                    <button type="submit">Rename</button>
+                </form>
+            </td>
+            <td>{{ "Active" if area.is_active else "Inactive" }}</td>
+            <td style="display: flex; gap: 8px;">
+                <form method="POST" action="{{ url_for('service_area_toggle', area_id=area.id) }}">
+                    <button type="submit">{{ "Deactivate" if area.is_active else "Activate" }}</button>
+                </form>
+                <form method="POST" action="{{ url_for('service_area_delete', area_id=area.id) }}"
+                      onsubmit="return confirm('Delete this service area?');">
+                    <button type="submit">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% endblock %}

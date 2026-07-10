@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Manage Users{% endblock %}
+{% block content %}
+<h1>Manage Users</h1>
+
+<h2 class="section-title">Pending Approval ({{ pending|length }})</h2>
+{% if pending %}
+<table>
+  <thead>
+    <tr><th>Name</th><th>Email</th><th>Requested</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for u in pending %}
+    <tr>
+      <td>{{ u.full_name }}</td>
+      <td>{{ u.email }}</td>
+      <td>{{ u.created_at.strftime('%d %b %Y') if u.created_at else '' }}</td>
+      <td>
+        <form method="post" action="{{ url_for('auth.approve_user', user_id=u.id) }}" style="display:inline">
+          <button type="submit" class="btn">Approve</button>
+        </form>
+        <form method="post" action="{{ url_for('auth.reject_user', user_id=u.id) }}" style="display:inline"
+              onsubmit="return confirm('Reject and delete this registration request?');">
+          <button type="submit" class="btn btn-danger">Reject</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:#52606d;">No pending registrations.</p>
+{% endif %}
+
+<h2 class="section-title">Approved Users ({{ approved|length }})</h2>
+<table>
+  <thead>
+    <tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for u in approved %}
+    <tr>
+      <td>{{ u.full_name }}{% if u.id == current_user.id %} (you){% endif %}</td>
+      <td>{{ u.email }}</td>
+      <td><span class="status-pill {{ 'status-Completed' if u.role == 'admin' else 'status-Planned' }}">{{ u.role }}</span></td>
+      <td>
+        {% if u.id != current_user.id %}
+        <form method="post" action="{{ url_for('auth.change_role', user_id=u.id) }}" style="display:inline">
+          <input type="hidden" name="role" value="{{ 'staff' if u.role == 'admin' else 'admin' }}">
+          <button type="submit" class="btn btn-secondary">
+            {{ 'Demote to Staff' if u.role == 'admin' else 'Promote to Admin' }}
+          </button>
+        </form>
+        <form method="post" action="{{ url_for('auth.remove_user', user_id=u.id) }}" style="display:inline"
+              onsubmit="return confirm('Remove this user\'s account?');">
+          <button type="submit" class="btn btn-danger">Remove</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

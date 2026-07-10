@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+{% if current_user.is_admin %}
+<form method="get" class="filters">
+  <div>
+    <label>View Staff</label>
+    <select name="staff_id" onchange="this.form.submit()">
+      <option value="">All Staff (Combined)</option>
+      {% for s in staff_list %}
+        <option value="{{ s.id }}" {% if selected_staff and selected_staff.id == s.id %}selected{% endif %}>
+          {{ s.full_name }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+{% endif %}
+<h1>Overview</h1>
+
+<div class="cards">
+  <div class="card"><div class="value">{{ total }}</div><div class="label">Total Activities</div></div>
+  <div class="card completed"><div class="value">{{ completed }}</div><div class="label">Completed</div></div>
+  <div class="card ongoing"><div class="value">{{ ongoing }}</div><div class="label">Ongoing</div></div>
+  <div class="card delayed"><div class="value">{{ delayed }}</div><div class="label">Delayed</div></div>
+  <div class="card"><div class="value">{{ "%.0f"|format(total_etb) }}</div><div class="label">Total Financial Result (ETB)</div></div>
+</div>
+
+<a class="btn" href="{{ url_for('activity_add') }}">+ Add New Activity</a>
+
+<h2 class="section-title">Recent Activities</h2>
+<table>
+  <thead>
+    <tr><th>Date</th><th>Service Area</th><th>Activity</th><th>Status</th><th>ETB</th></tr>
+  </thead>
+  <tbody>
+    {% for a in recent %}
+    <tr>
+      <td>{{ a.date.strftime('%d %b %Y') }}</td>
+      <td>{{ a.service_area }}</td>
+      <td>{{ a.specific_activity }}</td>
+      <td><span class="status-pill status-{{ a.status }}">{{ a.status }}</span></td>
+      <td>{{ "%.0f"|format(a.financial_result or 0) }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5">No activities yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

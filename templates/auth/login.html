@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Log In{% endblock %}
+{% block content %}
+<h1>Log In</h1>
+
+<form method="post" class="form-grid" style="max-width:420px;" novalidate>
+  {{ form.hidden_tag() }}
+
+  <div class="full">{{ form.email.label }} {{ form.email(placeholder="you@example.com") }}</div>
+  <div class="full">{{ form.password.label }} {{ form.password() }}</div>
+  <div class="full">{{ form.remember_me() }} {{ form.remember_me.label }}</div>
+
+  <div class="form-actions">
+    {{ form.submit(class="btn") }}
+  </div>
+</form>
+
+<p style="margin-top:14px;">
+  Don't have an account yet? <a href="{{ url_for('auth.register') }}">Register here</a>.
+</p>
+{% endblock %}

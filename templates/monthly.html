@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Monthly Dashboard{% endblock %}
+{% block content %}
+<h1>Monthly Dashboard</h1>
+
+<form class="filters" method="get">
+  <div>
+    <label>Select Year</label>
+    <select name="year">
+      {% for y in years %}<option value="{{ y }}" {% if year==y %}selected{% endif %}>{{ y }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <label>Select Month</label>
+    <select name="month">
+      {% for m in months %}<option value="{{ m }}" {% if month==m %}selected{% endif %}>{{ m }}</option>{% endfor %}
+    </select>
+  </div>
+  <div><button class="btn" type="submit">Go</button></div>
+</form>
+
+<div class="cards">
+  <div class="card"><div class="value">{{ summary.total }}</div><div class="label">Total Activities</div></div>
+  <div class="card completed"><div class="value">{{ summary.completed }}</div><div class="label">Completed</div></div>
+  <div class="card ongoing"><div class="value">{{ summary.ongoing }}</div><div class="label">Ongoing</div></div>
+  <div class="card delayed"><div class="value">{{ summary.delayed }}</div><div class="label">Delayed</div></div>
+  <div class="card"><div class="value">{{ "%.0f"|format(summary.total_etb) }}</div><div class="label">Total Financial Result (ETB)</div></div>
+</div>
+
+<h2 class="section-title">Breakdown by Service Area — {{ month }} {{ year }}</h2>
+<table>
+  <thead>
+    <tr><th>Service Area</th><th>No. of Activities</th><th>Completed</th><th>Ongoing</th><th>Delayed</th><th>Financial Result (ETB)</th></tr>
+  </thead>
+  <tbody>
+    {% for row in breakdown %}
+    <tr>
+      <td>{{ row.service_area }}</td>
+      <td>{{ row.total }}</td>
+      <td>{{ row.completed }}</td>
+      <td>{{ row.ongoing }}</td>
+      <td>{{ row.delayed }}</td>
+      <td>{{ "%.0f"|format(row.etb or 0) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

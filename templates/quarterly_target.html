@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Quarterly Target vs Achievement{% endblock %}
+{% block content %}
+<h1>Quarterly Target vs Achievement</h1>
+
+<form class="filters" method="get">
+  <div>
+    <label>Select Year (Fiscal)</label>
+    <select name="year">
+      {% for y in years %}<option value="{{ y }}" {% if year==y %}selected{% endif %}>{{ y }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <label>Select Quarter</label>
+    <select name="quarter">
+      {% for q in quarters %}<option value="{{ q }}" {% if quarter==q %}selected{% endif %}>{{ q }}</option>{% endfor %}
+    </select>
+  </div>
+  <div><button class="btn" type="submit">Go</button></div>
+</form>
+
+<h2 class="section-title">Quarter Total — All Service Areas</h2>
+<table>
+  <thead>
+    <tr><th>Target (Count)</th><th>Actual (Count)</th><th>Achievement %</th><th>Target (ETB)</th><th>Actual (ETB)</th><th>Achievement % (ETB)</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>{{ totals.target_count|int }}</td>
+      <td>{{ totals.actual_count }}</td>
+      <td class="{{ 'pct-good' if totals.pct_count and totals.pct_count>=1 else 'pct-bad' }}">
+        {{ "%.0f%%"|format(totals.pct_count*100) if totals.pct_count is not none else "—" }}
+      </td>
+      <td>{{ "%.0f"|format(totals.target_etb) }}</td>
+      <td>{{ "%.0f"|format(totals.actual_etb) }}</td>
+      <td class="{{ 'pct-good' if totals.pct_etb and totals.pct_etb>=1 else 'pct-bad' }}">
+        {{ "%.0f%%"|format(totals.pct_etb*100) if totals.pct_etb is not none else "—" }}
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 class="section-title">Breakdown by Service Area — {{ quarter }} FY{{ year }}</h2>
+<table>
+  <thead>
+    <tr><th>Service Area</th><th>Target (Count)</th><th>Actual (Count)</th><th>Achievement %</th><th>Target (ETB)</th><th>Actual (ETB)</th><th>Achievement % (ETB)</th></tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.service_area }}</td>
+      <td>{{ row.target_count|int }}</td>
+      <td>{{ row.actual_count }}</td>
+      <td class="{{ 'pct-good' if row.pct_count and row.pct_count>=1 else 'pct-bad' }}">
+        {{ "%.0f%%"|format(row.pct_count*100) if row.pct_count is not none else "—" }}
+      </td>
+      <td>{{ "%.0f"|format(row.target_etb) }}</td>
+      <td>{{ "%.0f"|format(row.actual_etb) }}</td>
+      <td class="{{ 'pct-good' if row.pct_etb and row.pct_etb>=1 else 'pct-bad' }}">
+        {{ "%.0f%%"|format(row.pct_etb*100) if row.pct_etb is not none else "—" }}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<p style="margin-top:16px;"><a class="btn btn-secondary" href="{{ url_for('targets', year=year) }}">Edit Targets for FY{{ year }}</a></p>
+{% endblock %}
