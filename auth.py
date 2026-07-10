@@ -9,7 +9,6 @@ Handles user accounts:
     and promote/demote staff <-> admin.
 """
 import os
-import resend
 import random
 from datetime import datetime, timedelta
 
@@ -134,7 +133,39 @@ def resend_otp(user_id):
     _send_otp_email(user)
     flash("A new code has been sent to your email.", "info")
     return redirect(url_for("auth.verify_email", user_id=user.id))
+@auth_bp.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    form = ForgotPasswordForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(email=form.email.data.lower().strip()).first()
+        if user:
+            _send_otp_email(user)
+        flash("If that email is registered, a reset code has been sent.", "info")
+        return redirect(url_for("auth.reset_password", user_id=user.id if user else 0))
+    return render_template("auth/forgot_password.html", form=form)
 
+
+@auth_bp.route("/reset-password/<int:user_id>", methods=["GET", "POST"])
+def reset_password(user_id):
+    user = User.query.get_or_404(user_id)
+    form = ResetPasswordForm()
+    if form.validate_on_submit():
+        if (
+            user.otp_code != form.otp_code.data
+            or not user.otp_expires_at
+            or user.otp_expires_at < datetime.utcnow()
+        ):
+            flash("Invalid or expired code. Please request a new one.", "danger")
+            return redirect(url_for("auth.forgot_password"))
+
+        user.set_password(form.password.data)
+        user.otp_code = None
+        user.otp_expires_at = None
+        db.session.commit()
+        flash("Your password has been reset. You can now log in.", "success")
+        return redirect(url_for("auth.login"))
+
+    return render_template("auth/reset_password.html", form=form, user_id=user_id)
 @auth_bp.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
