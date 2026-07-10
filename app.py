@@ -176,24 +176,30 @@ def register_routes(app: Flask):
     def dashboard():
         staff_id = request.args.get("staff_id", type=int)
 
-        query = Activity.query
+    query = Activity.query
+    if current_user.is_admin:
         if staff_id:
             query = query.filter_by(user_id=staff_id)
+        # else: admin sees everyone (combined) by default
+    else:
+        # Non-admin staff always see only their own activities
+        query = query.filter_by(user_id=current_user.id)
 
-        total = query.count()
-        completed = query.filter(Activity.status == "Completed").count()
-        ongoing = query.filter(Activity.status == "Ongoing").count()
-        delayed = query.filter(Activity.status == "Delayed").count()
-        total_etb = db.session.query(func.coalesce(func.sum(Activity.financial_result), 0))\
-            .filter(Activity.user_id == staff_id if staff_id else True).scalar()
-        recent = query.order_by(Activity.date.desc()).limit(8).all()
+    total = query.count()
+    completed = query.filter(Activity.status == "Completed").count()
+    ongoing = query.filter(Activity.status == "Ongoing").count()
+    delayed = query.filter(Activity.status == "Delayed").count()
+    total_etb = db.session.query(func.coalesce(func.sum(Activity.financial_result), 0))\
+        .filter(Activity.user_id == staff_id if (current_user.is_admin and staff_id) else
+                (Activity.user_id == current_user.id if not current_user.is_admin else True)).scalar()
+    recent = query.order_by(Activity.date.desc()).limit(8).all()
 
-        staff_list = User.query.filter_by(role="staff", is_approved=True).order_by(User.full_name).all()
-        selected_staff = User.query.get(staff_id) if staff_id else None
+    staff_list = User.query.filter_by(role="staff", is_approved=True).order_by(User.full_name).all() if current_user.is_admin else []
+    selected_staff = User.query.get(staff_id) if (current_user.is_admin and staff_id) else None
 
-        return render_template("dashboard.html", total=total, completed=completed,
-                                ongoing=ongoing, delayed=delayed, total_etb=total_etb,
-                                recent=recent, staff_list=staff_list, selected_staff=selected_staff)
+    return render_template("dashboard.html", total=total, completed=completed,
+                            ongoing=ongoing, delayed=delayed, total_etb=total_etb,
+                            recent=recent, staff_list=staff_list, selected_staff=selected_staff)
 
     # ------------------------------------------------------------------
     # Activity Log — CRUD (the master sheet)
