@@ -35,12 +35,15 @@ def _send_otp_email(user):
     db.session.commit()
 
     resend.api_key = os.environ.get("RESEND_API_KEY")
-    resend.Emails.send({
-        "from": "onboarding@resend.dev",
-        "to": [user.email],
-        "subject": "Your verification code",
-        "html": f"<p>Hi {user.full_name},</p><p>Your verification code is: <strong>{code}</strong></p><p>This code expires in 15 minutes.</p>",
-    })
+    try:
+        resend.Emails.send({
+            "from": "onboarding@resend.dev",
+            "to": [user.email],
+            "subject": "Your verification code",
+            "html": f"<p>Hi {user.full_name},</p><p>Your verification code is: <strong>{code}</strong></p><p>This code expires in 15 minutes.</p>",
+        })
+    except Exception as e:
+        print(f"Failed to send OTP email to {user.email}: {e}")
 
 
 
