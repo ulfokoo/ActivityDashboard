@@ -56,6 +56,9 @@ def _ensure_user_columns():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_code VARCHAR(6)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_expires_at TIMESTAMP",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(30)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS id_no VARCHAR(50)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS segment VARCHAR(120)",
     ]
     with db.engine.connect() as conn:
         for stmt in statements:
@@ -77,6 +80,7 @@ def _seed_default_admin():
         email="ulfatazawude79@gmail.com",
         role="admin",
         is_approved=True,
+        email_verified=True,
     )
     admin.set_password(default_password)
 

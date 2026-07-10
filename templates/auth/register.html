@@ -7,16 +7,20 @@
 </p>
 
 <form method="post" class="form-grid" style="max-width:420px;" novalidate>
-  {{ form.hidden_tag() }}
+    {{ form.hidden_tag() }}
 
-  <div class="full">{{ form.full_name.label }} {{ form.full_name() }}</div>
-  <div class="full">{{ form.email.label }} {{ form.email(placeholder="you@example.com") }}</div>
-  <div class="full">{{ form.password.label }} {{ form.password() }}</div>
-  <div class="full">{{ form.confirm_password.label }} {{ form.confirm_password() }}</div>
+    <div class="full">{{ form.full_name.label }} {{ form.full_name() }}</div>
+    <div class="full">{{ form.email.label }} {{ form.email(placeholder="you@example.com") }}</div>
+    <div class="full">{{ form.contact_phone.label }} {{ form.contact_phone(placeholder="e.g. 0912345678") }}</div>
+    <div class="full">{{ form.id_no.label }} {{ form.id_no() }}</div>
+    <div class="full">{{ form.segment.label }} {{ form.segment() }}</div>
+    <div class="full">{{ form.position.label }} {{ form.position() }}</div>
+    <div class="full">{{ form.password.label }} {{ form.password() }}</div>
+    <div class="full">{{ form.confirm_password.label }} {{ form.confirm_password() }}</div>
 
-  <div class="form-actions">
-    {{ form.submit(class="btn") }}
-  </div>
+    <div class="form-actions">
+      {{ form.submit(class="btn") }}
+    </div>
 </form>
 
 <p style="margin-top:14px;">

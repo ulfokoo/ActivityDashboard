@@ -19,6 +19,10 @@ def _active_service_area_choices():
 class RegisterForm(FlaskForm):
     full_name = StringField("Full Name", validators=[DataRequired(), Length(max=120)])
     email = StringField("Email", validators=[DataRequired(), Email(), Length(max=120)])
+    contact_phone = StringField("Contact Phone", validators=[DataRequired(), Length(max=30)])
+    id_no = StringField("ID No.", validators=[DataRequired(), Length(max=50)])
+    segment = StringField("Segment", validators=[DataRequired(), Length(max=120)])
+    position = StringField("Position", validators=[DataRequired(), Length(max=120)])
     password = PasswordField("Password", validators=[DataRequired(), Length(min=8)])
     confirm_password = PasswordField(
         "Confirm Password",
@@ -32,7 +36,19 @@ class LoginForm(FlaskForm):
     password = PasswordField("Password", validators=[DataRequired()])
     remember_me = BooleanField("Remember me")
     submit = SubmitField("Log In")
+class ForgotPasswordForm(FlaskForm):
+    email = StringField("Email", validators=[DataRequired(), Email()])
+    submit = SubmitField("Send Reset Code")
 
+
+class ResetPasswordForm(FlaskForm):
+    otp_code = StringField("Verification Code", validators=[DataRequired(), Length(min=6, max=6)])
+    password = PasswordField("New Password", validators=[DataRequired(), Length(min=8)])
+    confirm_password = PasswordField(
+        "Confirm New Password",
+        validators=[DataRequired(), EqualTo("password", message="Passwords must match.")],
+    )
+    submit = SubmitField("Reset Password")
 
 class ActivityForm(FlaskForm):
     date = DateField("Date", validators=[DataRequired()])

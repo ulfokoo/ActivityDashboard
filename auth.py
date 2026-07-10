@@ -23,7 +23,7 @@ from flask_login import (
 )
 
 from models import db, User
-from forms import RegisterForm, LoginForm, OTPForm
+from forms import RegisterForm, LoginForm, OTPForm, ForgotPasswordForm, ResetPasswordForm
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -83,6 +83,10 @@ def register():
         user = User(
             full_name=form.full_name.data.strip(),
             email=form.email.data.lower().strip(),
+            contact_phone=form.contact_phone.data.strip(),
+            id_no=form.id_no.data.strip(),
+            segment=form.segment.data.strip(),
+            position=form.position.data.strip(),
             role="staff",       # self-registered accounts are always staff
             is_approved=False,  # must be approved by an admin before login
         )
@@ -95,7 +99,6 @@ def register():
         return redirect(url_for("auth.verify_email", user_id=user.id))
 
     return render_template("auth/register.html", form=form)
-
 
 @auth_bp.route("/verify-email/<int:user_id>", methods=["GET", "POST"])
 def verify_email(user_id):
@@ -169,6 +172,74 @@ def logout():
     flash("You have been logged out.", "info")
     return redirect(url_for("auth.login"))
 
+def _send_password_reset_otp(user):
+    """Same mechanism as email verification, reused for password reset."""
+    code = f"{random.randint(0, 999999):06d}"
+    user.otp_code = code
+    user.otp_expires_at = datetime.utcnow() + timedelta(minutes=15)
+    db.session.commit()
+
+    resend.api_key = os.environ.get("RESEND_API_KEY")
+    try:
+        resend.Emails.send({
+            "from": "onboarding@resend.dev",
+            "to": [user.email],
+            "subject": "Your password reset code",
+            "html": f"<p>Hi {user.full_name},</p><p>Your password reset code is: <strong>{code}</strong></p><p>This code expires in 15 minutes. If you didn't request this, you can ignore this email.</p>",
+        })
+    except Exception as e:
+        print(f"Failed to send reset OTP email to {user.email}: {e}")
+
+
+@auth_bp.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if current_user.is_authenticated:
+        return redirect(url_for("dashboard"))
+
+    form = ForgotPasswordForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(email=form.email.data.lower().strip()).first()
+        if user:
+            _send_password_reset_otp(user)
+            return redirect(url_for("auth.reset_password", user_id=user.id))
+        flash("If that email is registered, we've sent a reset code to it.", "info")
+
+    return render_template("auth/forgot_password.html", form=form)
+
+
+@auth_bp.route("/reset-password/<int:user_id>", methods=["GET", "POST"])
+def reset_password(user_id):
+    if current_user.is_authenticated:
+        return redirect(url_for("dashboard"))
+
+    user = User.query.get_or_404(user_id)
+    form = ResetPasswordForm()
+
+    if form.validate_on_submit():
+        entered = form.otp_code.data.strip()
+
+        if not user.otp_code or not user.otp_expires_at or datetime.utcnow() > user.otp_expires_at:
+            flash("That code has expired. Please request a new one.", "danger")
+            return redirect(url_for("auth.forgot_password"))
+        elif entered != user.otp_code:
+            flash("Incorrect code. Please try again.", "danger")
+        else:
+            user.set_password(form.password.data)
+            user.otp_code = None
+            user.otp_expires_at = None
+            db.session.commit()
+            flash("Password reset successful. Please log in.", "success")
+            return redirect(url_for("auth.login"))
+
+    return render_template("auth/reset_password.html", user=user, form=form)
+
+
+@auth_bp.route("/forgot-password/<int:user_id>/resend")
+def resend_reset_otp(user_id):
+    user = User.query.get_or_404(user_id)
+    _send_password_reset_otp(user)
+    flash("A new reset code has been sent to your email.", "info")
+    return redirect(url_for("auth.reset_password", user_id=user.id))
 
 # ---------------------------------------------------------------------------
 # Admin: manage users (approve / reject / change role)

@@ -20,6 +20,12 @@ class User(UserMixin, db.Model):
     role = db.Column(db.String(20), nullable=False, default="staff")
     position = db.Column(db.String(120))
     department = db.Column(db.String(120))
+
+    # ✅ NEW registration fields
+    contact_phone = db.Column(db.String(30))
+    id_no = db.Column(db.String(50))
+    segment = db.Column(db.String(120))
+
     otp_code = db.Column(db.String(6))
     otp_expires_at = db.Column(db.DateTime)
     email_verified = db.Column(db.Boolean, default=False)
