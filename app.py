@@ -34,6 +34,7 @@ def create_app():
 
     with app.app_context():
         db.create_all()
+        _ensure_user_columns()
         _seed_if_empty()
         _seed_default_admin()
         _seed_service_areas_if_empty()
@@ -41,6 +42,28 @@ def create_app():
     register_routes(app)
     return app
 
+def _ensure_user_columns():
+    """
+    Safety net: db.create_all() only creates NEW tables, it never adds
+    columns to a table that already exists. This adds any columns the
+    User model needs but the live database is still missing, so old
+    deployments upgrade themselves automatically without losing data.
+    """
+    from sqlalchemy import text
+    statements = [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS position VARCHAR(120)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS department VARCHAR(120)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_code VARCHAR(6)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_expires_at TIMESTAMP",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE",
+    ]
+    with db.engine.connect() as conn:
+        for stmt in statements:
+            try:
+                conn.execute(text(stmt))
+            except Exception as e:
+                print(f"Column migration skipped/failed: {e}")
+        conn.commit()
 
 def _seed_default_admin():
     existing_admin = User.query.filter_by(role="admin").first()
