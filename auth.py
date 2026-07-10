@@ -8,6 +8,8 @@ Handles user accounts:
   - An admin-only "Manage Users" screen to approve/reject pending accounts
     and promote/demote staff <-> admin.
 """
+import os
+import resend
 import random
 from datetime import datetime, timedelta
 
@@ -32,17 +34,13 @@ def _send_otp_email(user):
     user.otp_expires_at = datetime.utcnow() + timedelta(minutes=15)
     db.session.commit()
 
-    msg = Message(
-        subject="Your verification code",
-        recipients=[user.email],
-        body=(
-            f"Hi {user.full_name},\n\n"
-            f"Your verification code is: {code}\n"
-            f"This code expires in 15 minutes.\n\n"
-            f"If you didn't request this, you can ignore this email."
-        ),
-    )
-    mail.send(msg)
+    resend.api_key = os.environ.get("RESEND_API_KEY")
+    resend.Emails.send({
+        "from": "onboarding@resend.dev",
+        "to": [user.email],
+        "subject": "Your verification code",
+        "html": f"<p>Hi {user.full_name},</p><p>Your verification code is: <strong>{code}</strong></p><p>This code expires in 15 minutes.</p>",
+    })
 
 
 
