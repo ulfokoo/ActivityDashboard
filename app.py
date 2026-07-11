@@ -52,7 +52,7 @@ def _ensure_user_columns():
     User model needs but the live database is still missing, so old
     deployments upgrade themselves automatically without losing data.
     """
-    from sqlalchemy import text
+    from sqlalchemy import text, inspect
 
     columns_to_add = {
         "position": "VARCHAR(120)",
@@ -66,7 +66,8 @@ def _ensure_user_columns():
     }
 
     with db.engine.connect() as conn:
-        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(users)"))}
+        inspector = inspect(db.engine)
+        existing = {col["name"] for col in inspector.get_columns("users")}
         for col, coltype in columns_to_add.items():
             if col not in existing:
                 try:
@@ -74,6 +75,7 @@ def _ensure_user_columns():
                 except Exception as e:
                     print(f"Column migration skipped/failed: {e}")
         conn.commit()
+
 
 def _seed_default_admin():
     existing_admin = User.query.filter_by(role="admin").first()
@@ -99,6 +101,8 @@ def _seed_default_admin():
     print("Email: ulfatazawude79@gmail.com")
     print(f"Password: {default_password}")
     print("=" * 70)
+
+
 def _seed_service_areas_if_empty():
     if ServiceArea.query.first() is not None:
         return
