@@ -38,6 +38,7 @@ def create_app():
     with app.app_context():
         db.create_all()
         _ensure_user_columns()
+        _ensure_service_area_columns()
         _seed_if_empty()
         _seed_default_admin()
         _seed_service_areas_if_empty()
@@ -76,7 +77,29 @@ def _ensure_user_columns():
                 except Exception as e:
                     print(f"Column migration skipped/failed: {e}")
         conn.commit()
+def _ensure_service_area_columns():
+    """
+    Same safety net as _ensure_user_columns(), but for the service_areas
+    table — adds any columns the ServiceArea model needs that the live
+    database is still missing.
+    """
+    from sqlalchemy import text, inspect
 
+    columns_to_add = {
+        "created_by_id": "INTEGER REFERENCES users(id)",
+        "created_by_role": "VARCHAR(30)",
+    }
+
+    with db.engine.connect() as conn:
+        inspector = inspect(db.engine)
+        existing = {col["name"] for col in inspector.get_columns("service_areas")}
+        for col, coltype in columns_to_add.items():
+            if col not in existing:
+                try:
+                    conn.execute(text(f"ALTER TABLE service_areas ADD COLUMN {col} {coltype}"))
+                except Exception as e:
+                    print(f"Column migration skipped/failed: {e}")
+        conn.commit()
 
 def _seed_default_admin():
     existing_admin = User.query.filter_by(role="admin").first()
