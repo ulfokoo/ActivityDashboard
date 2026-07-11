@@ -63,6 +63,7 @@ def _ensure_user_columns():
         "contact_phone": "VARCHAR(30)",
         "id_no": "VARCHAR(50)",
         "segment": "VARCHAR(120)",
+        "manager_id": "INTEGER REFERENCES users(id)",
     }
 
     with db.engine.connect() as conn:
