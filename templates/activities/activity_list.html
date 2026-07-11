@@ -33,6 +33,17 @@
       {% for s in service_areas %}<option value="{{ s }}" {% if filters.service_area==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
     </select>
   </div>
+  {% if visible_staff %}
+  <div>
+    <label>Staff</label>
+    <select name="staff_id">
+      <option value="">-- All My Staff (Total) --</option>
+      {% for s in visible_staff %}
+      <option value="{{ s.id }}" {% if staff_id==s.id %}selected{% endif %}>{{ s.full_name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
   <div><button class="btn" type="submit">Filter</button></div>
   <div><a class="btn btn-secondary" href="{{ url_for('activity_list') }}">Reset</a></div>
 </form>
@@ -40,7 +51,7 @@
 <table>
   <thead>
     <tr>
-      <th>Date</th><th>Day</th><th>Week</th><th>Month</th><th>Qtr</th><th>FY</th>
+      <th>Date</th><th>Day</th><th>Staff</th><th>Week</th><th>Month</th><th>Qtr</th><th>FY</th>
       <th>Service Area</th><th>Activity</th><th>Status</th><th>ETB</th><th></th>
     </tr>
   </thead>
@@ -49,6 +60,7 @@
     <tr>
       <td>{{ a.date.strftime('%d %b %Y') }}</td>
       <td>{{ a.day }}</td>
+      <td>{{ a.user.full_name if a.user else "—" }}</td>
       <td>{{ a.week }}</td>
       <td>{{ a.month }}</td>
       <td>{{ a.quarter }}</td>
@@ -69,7 +81,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="11">No activities match these filters.</td></tr>
+    <tr><td colspan="12">No activities match these filters.</td></tr>
     {% endfor %}
   </tbody>
 </table>

@@ -1,12 +1,12 @@
 import secrets
 from datetime import date, datetime
 
-from flask import Flask, render_template, redirect, url_for, request, flash
+from flask import Flask, app, render_template, redirect, url_for, request, flash
 from flask_login import LoginManager, login_required, current_user
 from sqlalchemy import func
 
 import config
-from models import db, Activity, Target, User, ServiceArea, calc_quarter, calc_fiscal_year
+from models import db, Activity, Target, User, ServiceArea, QuarterServiceArea, calc_quarter, calc_fiscal_year, get_all_subordinates
 from forms import ActivityForm, TargetForm
 from auth import auth_bp, admin_required
 from extensions import mail
@@ -31,6 +31,9 @@ def create_app():
     login_manager.init_app(app)
     mail.init_app(app)
     app.register_blueprint(auth_bp)
+    @app.teardown_appcontext
+    def shutdown_session(exception=None):
+            db.session.remove()
 
     with app.app_context():
         db.create_all()
@@ -50,22 +53,26 @@ def _ensure_user_columns():
     deployments upgrade themselves automatically without losing data.
     """
     from sqlalchemy import text
-    statements = [
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS position VARCHAR(120)",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS department VARCHAR(120)",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_code VARCHAR(6)",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_expires_at TIMESTAMP",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(30)",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS id_no VARCHAR(50)",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS segment VARCHAR(120)",
-    ]
+
+    columns_to_add = {
+        "position": "VARCHAR(120)",
+        "department": "VARCHAR(120)",
+        "otp_code": "VARCHAR(6)",
+        "otp_expires_at": "TIMESTAMP",
+        "email_verified": "BOOLEAN DEFAULT 0",
+        "contact_phone": "VARCHAR(30)",
+        "id_no": "VARCHAR(50)",
+        "segment": "VARCHAR(120)",
+    }
+
     with db.engine.connect() as conn:
-        for stmt in statements:
-            try:
-                conn.execute(text(stmt))
-            except Exception as e:
-                print(f"Column migration skipped/failed: {e}")
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(users)"))}
+        for col, coltype in columns_to_add.items():
+            if col not in existing:
+                try:
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {coltype}"))
+                except Exception as e:
+                    print(f"Column migration skipped/failed: {e}")
         conn.commit()
 
 def _seed_default_admin():
@@ -190,7 +197,22 @@ def _seed_if_empty():
 
     db.session.commit()
 
-
+def _quarter_service_areas(year, quarter):
+    """
+    Return the list of service-area names active for one specific year+quarter.
+    The first time a quarter is viewed, seed it from whatever is currently
+    active in the master Service Areas list, so nothing breaks for quarters
+    you've already been using.
+    """
+    existing = QuarterServiceArea.query.filter_by(year=year, quarter=quarter).all()
+    if not existing:
+        active_areas = ServiceArea.query.filter_by(is_active=True) \
+            .order_by(ServiceArea.sort_order, ServiceArea.name).all()
+        for a in active_areas:
+            db.session.add(QuarterServiceArea(year=year, quarter=quarter, service_area=a.name))
+        db.session.commit()
+        existing = QuarterServiceArea.query.filter_by(year=year, quarter=quarter).all()
+    return [q.service_area for q in existing]
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -205,34 +227,42 @@ def register_routes(app: Flask):
     def dashboard():
         staff_id = request.args.get("staff_id", type=int)
 
-        query = Activity.query
-        if current_user.is_admin:
-            if staff_id:
-                query = query.filter_by(user_id=staff_id)
-            # else: admin sees everyone (combined) by default
+        # Who can this user see, if anyone?
+        if current_user.role == "admin":
+            staff_list = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
+        elif current_user.role in ("manager", "director", "vp"):
+            staff_list = get_all_subordinates(current_user)
         else:
-            # Non-admin staff always see only their own activities
-            query = query.filter_by(user_id=current_user.id)
+            staff_list = []
+        visible_ids = {u.id for u in staff_list}
 
-        total = query.count()
-        completed = query.filter(Activity.status == "Completed").count()
-        ongoing = query.filter(Activity.status == "Ongoing").count()
-        delayed = query.filter(Activity.status == "Delayed").count()
-        total_etb = db.session.query(func.coalesce(func.sum(Activity.financial_result), 0))\
-            .filter(Activity.user_id == staff_id if (current_user.is_admin and staff_id) else
-                    (Activity.user_id == current_user.id if not current_user.is_admin else True)).scalar()
-        recent = query.order_by(Activity.date.desc()).limit(8).all()
+        # Decide whose data to show — default is always the logged-in user's own.
+        selected_staff = None
+        if staff_id == 0:
+            # explicit "All My Staff (Total)" choice
+            filter_ids = list(visible_ids) if visible_ids else [current_user.id]
+        elif staff_id and staff_id in visible_ids:
+            selected_staff = User.query.get(staff_id)
+            filter_ids = [staff_id]
+        else:
+            filter_ids = [current_user.id]   # default: their own dashboard
 
-        staff_list = User.query.filter_by(role="staff", is_approved=True).order_by(User.full_name).all() if current_user.is_admin else []
-        selected_staff = User.query.get(staff_id) if (current_user.is_admin and staff_id) else None
+        base = Activity.query.filter(Activity.user_id.in_(filter_ids))
+        total = base.count()
+        completed = base.filter(Activity.status == "Completed").count()
+        ongoing = base.filter(Activity.status == "Ongoing").count()
+        delayed = base.filter(Activity.status == "Delayed").count()
+        total_etb = db.session.query(func.coalesce(func.sum(Activity.financial_result), 0)) \
+            .filter(Activity.user_id.in_(filter_ids)).scalar()
 
-        return render_template("dashboard.html", total=total, completed=completed,
-                                ongoing=ongoing, delayed=delayed, total_etb=total_etb,
-                                recent=recent, staff_list=staff_list, selected_staff=selected_staff)
+        recent = base.order_by(Activity.date.desc()).limit(10).all()
 
-    # ------------------------------------------------------------------
-    # Activity Log — CRUD (the master sheet)
-    # ------------------------------------------------------------------
+        return render_template(
+            "dashboard.html",
+            total=total, completed=completed, ongoing=ongoing, delayed=delayed, total_etb=total_etb,
+            recent=recent,
+            staff_list=staff_list, selected_staff=selected_staff,
+        )
     @app.route("/activities")
     @login_required
     def activity_list():
@@ -240,8 +270,28 @@ def register_routes(app: Flask):
         month = request.args.get("month")
         status = request.args.get("status")
         service_area = request.args.get("service_area")
+        staff_id = request.args.get("staff_id", type=int)
+
+        if current_user.role == "admin":
+            visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
+        elif current_user.role in ("manager", "director", "vp"):
+            visible_staff = get_all_subordinates(current_user)
+        else:
+            visible_staff = []
+        visible_ids = {u.id for u in visible_staff}
+
+        if staff_id and staff_id in visible_ids:
+            filter_ids = [staff_id]
+        elif current_user.role == "admin":
+            filter_ids = None
+        elif current_user.role in ("manager", "director", "vp"):
+            filter_ids = list(visible_ids) if visible_ids else [current_user.id]
+        else:
+            filter_ids = [current_user.id]
 
         q = Activity.query
+        if filter_ids is not None:
+            q = q.filter(Activity.user_id.in_(filter_ids))
         if year:
             q = q.filter(Activity.year == year)
         if month:
@@ -257,7 +307,8 @@ def register_routes(app: Flask):
         return render_template("activities/activity_list.html", activities=activities,
                                 years=years, months=config.MONTHS, statuses=config.STATUSES,
                                 service_areas=config.SERVICE_AREAS,
-                                filters=dict(year=year, month=month, status=status, service_area=service_area))
+                                filters=dict(year=year, month=month, status=status, service_area=service_area),
+                                visible_staff=visible_staff, staff_id=staff_id)
 
     @app.route("/activities/add", methods=["GET", "POST"])
     @login_required
@@ -323,15 +374,33 @@ def register_routes(app: Flask):
     def monthly_dashboard():
         year = request.args.get("year", type=int, default=datetime.now().year)
         month = request.args.get("month", default=config.MONTHS[datetime.now().month - 1])
+        staff_id = request.args.get("staff_id", type=int)
 
-        base = Activity.query.filter(Activity.year == year, Activity.month == month)
+        if current_user.role == "admin":
+            visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
+        elif current_user.role in ("manager", "director", "vp"):
+            visible_staff = get_all_subordinates(current_user)
+        else:
+            visible_staff = []
+        visible_ids = {u.id for u in visible_staff}
+
+        if staff_id and staff_id in visible_ids:
+            filter_ids = [staff_id]
+        elif current_user.role in ("admin", "manager", "director", "vp"):
+            filter_ids = list(visible_ids) if visible_ids else [current_user.id]
+        else:
+            filter_ids = [current_user.id]
+
+        base = Activity.query.filter(
+            Activity.year == year, Activity.month == month, Activity.user_id.in_(filter_ids)
+        )
         summary = dict(
             total=base.count(),
             completed=base.filter(Activity.status == "Completed").count(),
             ongoing=base.filter(Activity.status == "Ongoing").count(),
             delayed=base.filter(Activity.status == "Delayed").count(),
             total_etb=db.session.query(func.coalesce(func.sum(Activity.financial_result), 0))
-                .filter(Activity.year == year, Activity.month == month).scalar(),
+                .filter(Activity.year == year, Activity.month == month, Activity.user_id.in_(filter_ids)).scalar(),
         )
 
         breakdown = []
@@ -345,11 +414,12 @@ def register_routes(app: Flask):
                 delayed=rows.filter(Activity.status == "Delayed").count(),
                 etb=db.session.query(func.coalesce(func.sum(Activity.financial_result), 0))
                     .filter(Activity.year == year, Activity.month == month,
-                            Activity.service_area == sa).scalar(),
+                            Activity.service_area == sa, Activity.user_id.in_(filter_ids)).scalar(),
             ))
 
         return render_template("monthly.html", year=year, month=month, summary=summary,
-                                breakdown=breakdown, years=config.YEARS, months=config.MONTHS)
+                                breakdown=breakdown, years=config.YEARS, months=config.MONTHS,
+                                visible_staff=visible_staff, staff_id=staff_id)
 
     # ------------------------------------------------------------------
     # Quarterly Dashboard  (mirrors "Quarterly Dashboard" sheet)
@@ -359,15 +429,34 @@ def register_routes(app: Flask):
     def quarterly_dashboard():
         year = request.args.get("year", type=int, default=calc_fiscal_year(date.today()))
         quarter = request.args.get("quarter", default=calc_quarter(date.today()))
+        staff_id = request.args.get("staff_id", type=int)
 
-        base = Activity.query.filter(Activity.fiscal_year == year, Activity.quarter == quarter)
+        if current_user.role == "admin":
+            visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
+        elif current_user.role in ("manager", "director", "vp"):
+            visible_staff = get_all_subordinates(current_user)
+        else:
+            visible_staff = []
+        visible_ids = {u.id for u in visible_staff}
+
+        if staff_id and staff_id in visible_ids:
+            filter_ids = [staff_id]
+        elif current_user.role in ("admin", "manager", "director", "vp"):
+            filter_ids = list(visible_ids) if visible_ids else [current_user.id]
+        else:
+            filter_ids = [current_user.id]
+
+        base = Activity.query.filter(
+            Activity.fiscal_year == year, Activity.quarter == quarter, Activity.user_id.in_(filter_ids)
+        )
         summary = dict(
             total=base.count(),
             completed=base.filter(Activity.status == "Completed").count(),
             ongoing=base.filter(Activity.status == "Ongoing").count(),
             delayed=base.filter(Activity.status == "Delayed").count(),
             total_etb=db.session.query(func.coalesce(func.sum(Activity.financial_result), 0))
-                .filter(Activity.fiscal_year == year, Activity.quarter == quarter).scalar(),
+                .filter(Activity.fiscal_year == year, Activity.quarter == quarter,
+                        Activity.user_id.in_(filter_ids)).scalar(),
         )
 
         breakdown = []
@@ -381,11 +470,12 @@ def register_routes(app: Flask):
                 delayed=rows.filter(Activity.status == "Delayed").count(),
                 etb=db.session.query(func.coalesce(func.sum(Activity.financial_result), 0))
                     .filter(Activity.fiscal_year == year, Activity.quarter == quarter,
-                            Activity.service_area == sa).scalar(),
+                            Activity.service_area == sa, Activity.user_id.in_(filter_ids)).scalar(),
             ))
 
         return render_template("quarterly.html", year=year, quarter=quarter, summary=summary,
-                                breakdown=breakdown, years=config.YEARS, quarters=config.QUARTERS)
+                                breakdown=breakdown, years=config.YEARS, quarters=config.QUARTERS,
+                                visible_staff=visible_staff, staff_id=staff_id)
 
    # ------------------------------------------------------------------
     # Quarterly Target vs Achievement (mirrors that sheet + "Targets" sheet)
@@ -484,31 +574,84 @@ def register_routes(app: Flask):
             years=config.YEARS,
             quarters=config.QUARTERS
         )
+# ------------------------------------------------------------------
+    # Targets — data entry screen (mirrors "Targets" sheet)
+    # ------------------------------------------------------------------
     # ------------------------------------------------------------------
     # Targets — data entry screen (mirrors "Targets" sheet)
     # ------------------------------------------------------------------
     @app.route("/targets", methods=["GET", "POST"])
     @login_required
-    @admin_required
     def targets():
+        if current_user.role not in ("admin", "manager", "director", "vp"):
+            flash("That page is restricted.", "info")
+            return redirect(url_for("dashboard"))
+
         year = request.args.get("year", type=int, default=calc_fiscal_year(date.today()))
+        staff_id = request.args.get("staff_id", type=int)
 
-        # All approved staff, so the admin can pick who they're setting targets for.
-        staff = User.query.filter_by(role="staff", is_approved=True).order_by(User.full_name).all()
-
-        if request.method == "POST":
-            staff_id = request.form.get("staff_id", type=int)
+        if current_user.role == "admin":
+            visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
         else:
-            staff_id = request.args.get("staff_id", type=int)
-        if staff_id is None and staff:
-            staff_id = staff[0].id  # default to first staff member
+            visible_staff = get_all_subordinates(current_user)
+        visible_ids = {u.id for u in visible_staff}
+
+        if not visible_staff and current_user.role != "admin":
+            flash("You have no staff reporting to you yet.", "info")
 
         if request.method == "POST":
-            for key, value in request.form.items():
+            form = request.form
+
+            # 1) Remove
+            posted_staff_id = form.get("staff_id", type=int)
+            remove_key = next((k for k in form if k.startswith("remove_")), None)
+            if remove_key:
+                target_id = int(remove_key.split("_", 1)[1])
+                t = Target.query.get(target_id)
+                if t and (current_user.role == "admin" or t.user_id in visible_ids):
+                    quarter = t.quarter
+                    db.session.delete(t)
+                    db.session.commit()
+                    flash("Target removed.", "success")
+                    return redirect(url_for("targets", year=year, staff_id=posted_staff_id) + f"#{quarter}")
+                flash("Not authorized to remove that target.", "danger")
+                return redirect(url_for("targets", year=year, staff_id=posted_staff_id))
+
+            # 2) Add — staff comes from the top filter (posted_staff_id), applies per quarter
+            posted_staff_id = form.get("staff_id", type=int)
+            add_key = next((k for k in form if k.startswith("add_")), None)
+            if add_key:
+                quarter = add_key.split("_", 1)[1]
+                service_area = form.get(f"new_area_{quarter}")
+                count = form.get(f"new_count_{quarter}", 0, type=float)
+                etb = form.get(f"new_etb_{quarter}", 0, type=float)
+
+                if current_user.role != "admin" and posted_staff_id not in visible_ids:
+                    flash("Not authorized to assign targets to that person.", "danger")
+                    return redirect(url_for("targets", year=year, staff_id=posted_staff_id) + f"#{quarter}")
+
+                if posted_staff_id and service_area:
+                    existing = Target.query.filter_by(
+                        year=year, quarter=quarter, service_area=service_area, user_id=posted_staff_id
+                    ).first()
+                    if existing:
+                        flash("That staff member already has a target for this Service Area/quarter.", "info")
+                    else:
+                        db.session.add(Target(
+                            year=year, quarter=quarter, service_area=service_area,
+                            user_id=posted_staff_id, target_count=count or 0, target_etb=etb or 0,
+                        ))
+                        db.session.commit()
+                        flash("Target added.", "success")
+                return redirect(url_for("targets", year=year, staff_id=posted_staff_id) + f"#{quarter}")
+
+            # 3) Bulk save
+            last_quarter = None
+            for key, value in form.items():
                 if key.startswith("count_") or key.startswith("etb_"):
                     kind, target_id = key.split("_", 1)
                     t = Target.query.get(int(target_id))
-                    if t:
+                    if t and (current_user.role == "admin" or t.user_id in visible_ids):
                         try:
                             num = float(value) if value not in ("", None) else 0
                         except ValueError:
@@ -517,26 +660,38 @@ def register_routes(app: Flask):
                             t.target_count = num
                         else:
                             t.target_etb = num
+                        last_quarter = t.quarter
             db.session.commit()
             flash("Targets saved.", "success")
-            return redirect(url_for("targets", year=year, staff_id=staff_id))
+            anchor = f"#{last_quarter}" if last_quarter else ""
+            return redirect(url_for("targets", year=year, staff_id=posted_staff_id) + anchor)
 
-        grid = {}
+      # ---- GET ----
+        quarter_rows = {}
+        remaining_areas = {}
         for quarter in config.QUARTERS:
-            grid[quarter] = []
-            for sa in [s for s in config.SERVICE_AREAS if s != "Other"]:
-                t = Target.query.filter_by(year=year, quarter=quarter, service_area=sa,
-                                            user_id=staff_id).first()
-                if not t:
-                    t = Target(year=year, quarter=quarter, service_area=sa, user_id=staff_id,
-                               target_count=0, target_etb=0)
-                    db.session.add(t)
-                    db.session.commit()
-                grid[quarter].append(t)
+            areas = _quarter_service_areas(year, quarter)
+            q = Target.query.filter(Target.year == year, Target.quarter == quarter)
+            if current_user.role != "admin":
+                q = q.filter(Target.user_id.in_(visible_ids or [-1]))
+            if staff_id:
+                q = q.filter(Target.user_id == staff_id) 
+            all_targets_this_q = q.order_by(Target.service_area).all()
+            quarter_rows[quarter] = all_targets_this_q
+            used = {t.service_area for t in all_targets_this_q}
+            remaining_areas[quarter] = areas  # staff can repeat a Service Area for different people
 
-        return render_template("targets.html", year=year, grid=grid, years=config.YEARS,
-                                quarters=config.QUARTERS, staff=staff, staff_id=staff_id)
-
+        return render_template(
+            "targets.html",
+            year=year,
+            quarters=config.QUARTERS,
+            quarter_rows=quarter_rows,
+            remaining_areas=remaining_areas,
+            visible_staff=visible_staff,
+            years=config.YEARS,
+            staff_id=staff_id,
+        )
+        
     # ------------------------------------------------------------------
     # Annual Dashboard (mirrors "Annual Dashboard" sheet)
     # ------------------------------------------------------------------
@@ -544,15 +699,31 @@ def register_routes(app: Flask):
     @login_required
     def annual_dashboard():
         year = request.args.get("year", type=int, default=calc_fiscal_year(date.today()))
+        staff_id = request.args.get("staff_id", type=int)
 
-        base = Activity.query.filter(Activity.fiscal_year == year)
+        if current_user.role == "admin":
+            visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
+        elif current_user.role in ("manager", "director", "vp"):
+            visible_staff = get_all_subordinates(current_user)
+        else:
+            visible_staff = []
+        visible_ids = {u.id for u in visible_staff}
+
+        if staff_id and staff_id in visible_ids:
+            filter_ids = [staff_id]
+        elif current_user.role in ("admin", "manager", "director", "vp"):
+            filter_ids = list(visible_ids) if visible_ids else [current_user.id]
+        else:
+            filter_ids = [current_user.id]
+
+        base = Activity.query.filter(Activity.fiscal_year == year, Activity.user_id.in_(filter_ids))
         summary = dict(
             total=base.count(),
             completed=base.filter(Activity.status == "Completed").count(),
             ongoing=base.filter(Activity.status == "Ongoing").count(),
             delayed=base.filter(Activity.status == "Delayed").count(),
             total_etb=db.session.query(func.coalesce(func.sum(Activity.financial_result), 0))
-                .filter(Activity.fiscal_year == year).scalar(),
+                .filter(Activity.fiscal_year == year, Activity.user_id.in_(filter_ids)).scalar(),
         )
 
         matrix = []
@@ -560,20 +731,24 @@ def register_routes(app: Flask):
             row = {"service_area": sa, "months": [], "total": 0}
             for m in config.FISCAL_MONTHS:
                 c = Activity.query.filter(Activity.fiscal_year == year, Activity.service_area == sa,
-                                           Activity.month == m).count()
+                                        Activity.month == m, Activity.user_id.in_(filter_ids)).count()
                 row["months"].append(c)
                 row["total"] += c
             matrix.append(row)
 
         return render_template("annual.html", year=year, summary=summary, matrix=matrix,
-                                fiscal_months=config.FISCAL_MONTHS, years=config.YEARS)
+                                fiscal_months=config.FISCAL_MONTHS, years=config.YEARS,
+                                visible_staff=visible_staff, staff_id=staff_id)
 # ------------------------------------------------------------------
     # Admin: manage Service Areas
     # ------------------------------------------------------------------
+
     @app.route("/admin/service-areas")
     @login_required
-    @admin_required
     def service_area_list():
+        if current_user.role not in ("admin", "manager", "director", "vp"):
+            flash("That page is restricted.", "info")
+            return redirect(url_for("dashboard"))
         areas = ServiceArea.query.order_by(ServiceArea.sort_order, ServiceArea.name).all()
         return render_template("admin/service_areas.html", areas=areas)
 

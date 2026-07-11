@@ -21,12 +21,17 @@
       <a href="{{ url_for('quarterly_dashboard') }}">Quarterly</a>
       <a href="{{ url_for('quarterly_target') }}">Target vs Achievement</a>
       <a href="{{ url_for('annual_dashboard') }}">Annual</a>
-      {% if current_user.is_admin %}
+      {% if current_user.role in ("admin", "manager", "director", "vp") %}
         <a href="{{ url_for('targets') }}">Targets</a>
-        <a href="{{ url_for('auth.manage_users') }}">Manage Users</a>
-        <a href="{{ url_for('service_area_list') }}">Service Areas</a>
       {% endif %}
-      <a class="btn-highlight" href="{{ url_for('auth.logout') }}">Log Out ({{ current_user.full_name }})</a>
+      {% if current_user.is_admin %}
+  <a href="{{ url_for('auth.manage_users') }}">Manage Users</a>
+{% endif %}
+{% if current_user.role in ("admin", "manager", "director", "vp") %}
+  <a href="{{ url_for('service_area_list') }}">Service Areas</a>
+{% endif %}
+      {% set role_display = {"admin":"Admin","manager":"Manager","staff":"Staff","director":"Director","vp":"VP"} %}
+<a class="btn-highlight" href="{{ url_for('auth.logout') }}">Log Out ({{ current_user.full_name }} – {{ role_display.get(current_user.role, current_user.role) }})</a>
     {% else %}
       <a href="{{ url_for('auth.login') }}">Log In</a>
       <a href="{{ url_for('auth.register') }}">Register</a>

@@ -10,6 +10,17 @@
       {% for y in years %}<option value="{{ y }}" {% if year==y %}selected{% endif %}>{{ y }}</option>{% endfor %}
     </select>
   </div>
+  {% if visible_staff %}
+  <div>
+    <label>Select Staff</label>
+    <select name="staff_id" onchange="this.form.submit()">
+      <option value="">-- All My Staff (Total) --</option>
+      {% for s in visible_staff %}
+      <option value="{{ s.id }}" {% if staff_id==s.id %}selected{% endif %}>{{ s.full_name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
 </form>
 
 <div class="cards">

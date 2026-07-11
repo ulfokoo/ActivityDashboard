@@ -1,4 +1,5 @@
 import os
+from sqlalchemy.pool import NullPool
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -9,7 +10,11 @@ class Config:
     if _database_url and _database_url.startswith("postgres://"):
         _database_url = _database_url.replace("postgres://", "postgresql://", 1)
     SQLALCHEMY_DATABASE_URI = _database_url or ("sqlite:///" + os.path.join(BASE_DIR, "instance", "database.db"))
-    SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 280}
+
+    if _database_url:
+        SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 280}
+    else:
+        SQLALCHEMY_ENGINE_OPTIONS = {"poolclass": NullPool}
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     MAIL_SERVER = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
     MAIL_PORT = int(os.environ.get("MAIL_PORT", 587))

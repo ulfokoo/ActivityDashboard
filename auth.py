@@ -225,9 +225,15 @@ def logout():
 @login_required
 @admin_required
 def manage_users():
-    pending = User.query.filter_by(is_approved=False).order_by(User.created_at.desc()).all()
-    approved = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
-    return render_template("auth/manage_users.html", pending=pending, approved=approved)
+        pending = User.query.filter_by(is_approved=False).order_by(User.created_at.desc()).all()
+        approved = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
+        possible_managers = [u for u in approved if u.role != "staff"]
+        return render_template(
+            "auth/manage_users.html",
+            pending=pending,
+            approved=approved,
+            possible_managers=possible_managers,
+        )
 
 
 @auth_bp.route("/admin/users/<int:user_id>/approve", methods=["POST"])
@@ -239,6 +245,27 @@ def approve_user(user_id):
     db.session.commit()
     flash(f"{user.full_name} has been approved and can now log in.", "success")
     return redirect(url_for("auth.manage_users"))
+@auth_bp.route("/admin/users/<int:user_id>/update-role", methods=["POST"])
+@login_required
+@admin_required
+def update_user_role(user_id):
+        user = User.query.get_or_404(user_id)
+
+        new_role = request.form.get("role")
+        if new_role not in ("staff", "manager", "director", "vp", "admin"):
+            flash("Invalid role.", "danger")
+            return redirect(url_for("auth.manage_users"))
+
+        manager_id = request.form.get("manager_id", type=int)
+        if manager_id == user.id:
+            flash("A user can't report to themselves.", "danger")
+            return redirect(url_for("auth.manage_users"))
+
+        user.role = new_role
+        user.manager_id = manager_id if manager_id else None
+        db.session.commit()
+        flash(f"{user.full_name}'s role updated to {new_role}.", "success")
+        return redirect(url_for("auth.manage_users"))
 
 
 @auth_bp.route("/admin/users/<int:user_id>/reject", methods=["POST"])

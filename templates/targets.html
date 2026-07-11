@@ -2,7 +2,7 @@
 {% block title %}Targets{% endblock %}
 {% block content %}
 <h1>Quarterly Targets</h1>
-<p style="color:#52606d;">Enter target Count and ETB for each Service Area / Quarter, per staff member. Leave 0 if no target was set.</p>
+<p style="color:#52606d;">Enter target Count and ETB for each Service Area / Quarter. Leave 0 if no target was set.</p>
 
 <form class="filters" method="get">
   <div>
@@ -14,37 +14,60 @@
   <div>
     <label>Select Staff</label>
     <select name="staff_id" onchange="this.form.submit()">
-      {% for s in staff %}
+      {% for s in visible_staff %}
       <option value="{{ s.id }}" {% if staff_id==s.id %}selected{% endif %}>{{ s.full_name }}</option>
       {% endfor %}
     </select>
   </div>
 </form>
 
-{% if not staff %}
-<p style="color:#b91c1c;">No approved staff accounts yet. Approve a staff account under "Manage Users" first, then come back here to set their targets.</p>
+{% if not visible_staff %}
+<p style="color:#b91c1c;">You have no staff reporting to you yet. Ask an admin to set you as their manager under "Manage Users."</p>
 {% else %}
 <form method="post">
   <input type="hidden" name="staff_id" value="{{ staff_id }}">
+
   {% for quarter in quarters %}
-  <h2 class="section-title">{{ quarter }}</h2>
-  <table style="margin-bottom:20px;">
+  <h2 class="section-title" id="{{ quarter }}">{{ quarter }}</h2>
+  <table style="margin-bottom:24px;">
     <thead>
-      <tr><th>Service Area</th><th>Target (Count)</th><th>Target (ETB)</th></tr>
+      <tr>
+        <th>Service Area</th>
+        <th>Target (Count)</th>
+        <th>Target (ETB)</th>
+        <th></th>
+      </tr>
     </thead>
     <tbody>
-      {% for t in grid[quarter] %}
+      {% for t in quarter_rows[quarter] %}
       <tr>
         <td>{{ t.service_area }}</td>
         <td><input class="small-input" type="number" step="1" name="count_{{ t.id }}" value="{{ t.target_count|int }}"></td>
         <td><input class="small-input" type="number" step="1" name="etb_{{ t.id }}" value="{{ t.target_etb|int }}"></td>
+        <td><button type="submit" name="remove_{{ t.id }}" value="1" class="btn-small">Remove</button></td>
       </tr>
       {% endfor %}
+
+      {% if remaining_areas[quarter] %}
+      <tr>
+        <td>
+          <select name="new_area_{{ quarter }}">
+            <option value="">-- Select Service Area --</option>
+            {% for area in remaining_areas[quarter] %}
+            <option value="{{ area }}">{{ area }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td><input class="small-input" type="number" step="1" name="new_count_{{ quarter }}" value="0"></td>
+        <td><input class="small-input" type="number" step="1" name="new_etb_{{ quarter }}" value="0"></td>
+        <td><button type="submit" name="add_{{ quarter }}" value="1" class="btn-small">Add</button></td>
+      </tr>
+      {% endif %}
     </tbody>
   </table>
   {% endfor %}
 
-  <button type="submit" class="btn">Save Targets</button>
+  <button type="submit" class="btn">Save All Targets</button>
 </form>
 {% endif %}
 {% endblock %}

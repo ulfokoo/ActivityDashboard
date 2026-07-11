@@ -16,7 +16,7 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
 
-    # "admin" or "staff"
+    # "admin", "vp", "director", "manager", or "staff"
     role = db.Column(db.String(20), nullable=False, default="staff")
     position = db.Column(db.String(120))
     department = db.Column(db.String(120))
@@ -34,6 +34,10 @@ class User(UserMixin, db.Model):
     # admin approves them.
     is_approved = db.Column(db.Boolean, nullable=False, default=False)
 
+    # Reporting hierarchy: who this user reports to (their manager/director/VP)
+    manager_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    manager = db.relationship("User", remote_side=[id], backref="direct_reports")
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def set_password(self, raw_password: str):
@@ -47,15 +51,33 @@ class User(UserMixin, db.Model):
         return self.role == "admin"
 
 
+def get_all_subordinates(user):
+    """Every user reporting up to `user`, at any depth. Safe against cycles."""
+    result = []
+    seen_ids = {user.id}
+    stack = list(user.direct_reports)
+    while stack:
+        person = stack.pop()
+        if person.id in seen_ids:
+            continue  # cycle detected — skip, don't loop forever
+        seen_ids.add(person.id)
+        result.append(person)
+        stack.extend(person.direct_reports)
+    return result
+
 # ---------------------------------------------------------------------------
-# These three helpers reproduce, cell-for-cell, the formulas that used to
-# live in columns C, D, E, F, G, U of the "Activity Log" sheet:
-#   Day      =TEXT(date,"dddd")
-#   Week     ="W"&MIN(4,ROUNDUP(DAY(date)/7,0))
-#   Month    =TEXT(date,"mmmm")
-#   Quarter  ="Q"&(INT(MOD(MONTH(date)-7,12)/3)+1)      -> fiscal Q1=Jul-Sep
-#   Year     =YEAR(date)
-#   FiscalYr =YEAR(date)-IF(MONTH(date)<7,1,0)
+# Role-based permission for Service Areas: each role can only rename/delete
+# areas created by their own role or a role below them, never above.
+ROLE_RANK = {"staff": 0, "manager": 1, "director": 2, "vp": 3, "admin": 4}
+
+
+def can_manage_service_area(user, area) -> bool:
+    """True if `user` is allowed to rename/delete `area`."""
+    if user.role == "admin":
+        return True
+    creator_rank = ROLE_RANK.get(area.created_by_role, 0)
+    user_rank = ROLE_RANK.get(user.role, 0)
+    return user_rank >= creator_rank
 # ---------------------------------------------------------------------------
 
 def calc_day(d: date) -> str:
@@ -153,3 +175,31 @@ class ServiceArea(db.Model):
     name = db.Column(db.String(120), unique=True, nullable=False)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     sort_order = db.Column(db.Integer, default=0)
+
+    # Who created this Service Area, and what role they held at the time —
+    # used to control who's allowed to rename/delete it later.
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_by_role = db.Column(db.String(20), nullable=True)
+    creator = db.relationship("User")
+
+
+class QuarterServiceArea(db.Model):
+    """
+    Tracks which Service Areas (from the master ServiceArea list) apply to
+    a specific quarter of a specific year. This lets Q1 2026 have a
+    different set of service areas than Q2 2026, instead of every quarter
+    always showing the same fixed list.
+    """
+    __tablename__ = "quarter_service_areas"
+
+    id = db.Column(db.Integer, primary_key=True)
+    year = db.Column(db.Integer, nullable=False)
+    quarter = db.Column(db.String(5), nullable=False)
+    service_area = db.Column(db.String(120), nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "year", "quarter", "service_area",
+            name="uq_quarter_service_area"
+        ),
+    )

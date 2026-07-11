@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
-{% if current_user.is_admin %}
+{% if staff_list %}
 <form method="get" class="filters">
   <div>
     <label>View Staff</label>
     <select name="staff_id" onchange="this.form.submit()">
-      <option value="">All Staff (Combined)</option>
+      <option value="0">All Staff (Combined)</option>
       {% for s in staff_list %}
-        <option value="{{ s.id }}" {% if selected_staff and selected_staff.id == s.id %}selected{% endif %}>
-          {{ s.full_name }}
-        </option>
+      <option value="{{ s.id }}" {% if selected_staff and selected_staff.id == s.id %}selected{% endif %}>
+        {{ s.full_name }}
+      </option>
       {% endfor %}
     </select>
   </div>

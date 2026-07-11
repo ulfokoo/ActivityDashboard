@@ -38,27 +38,38 @@
     <tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr>
   </thead>
   <tbody>
-    {% for u in approved %}
-    <tr>
-      <td>{{ u.full_name }}{% if u.id == current_user.id %} (you){% endif %}</td>
-      <td>{{ u.email }}</td>
-      <td><span class="status-pill {{ 'status-Completed' if u.role == 'admin' else 'status-Planned' }}">{{ u.role }}</span></td>
-      <td>
-        {% if u.id != current_user.id %}
-        <form method="post" action="{{ url_for('auth.change_role', user_id=u.id) }}" style="display:inline">
-          <input type="hidden" name="role" value="{{ 'staff' if u.role == 'admin' else 'admin' }}">
-          <button type="submit" class="btn btn-secondary">
-            {{ 'Demote to Staff' if u.role == 'admin' else 'Promote to Admin' }}
-          </button>
-        </form>
-        <form method="post" action="{{ url_for('auth.remove_user', user_id=u.id) }}" style="display:inline"
-              onsubmit="return confirm('Remove this user\'s account?');">
-          <button type="submit" class="btn btn-danger">Remove</button>
-        </form>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+      {% for u in approved %}
+      <tr>
+        <td>{{ u.full_name }}{% if u.id == current_user.id %} (you){% endif %}</td>
+        <td>{{ u.email }}</td>
+        <td>
+          <form method="post" action="{{ url_for('auth.update_user_role', user_id=u.id) }}" style="display:flex; gap:6px; align-items:center;">
+            <select name="role">
+              {% for r in ['staff', 'manager', 'director', 'vp', 'admin'] %}
+              <option value="{{ r }}" {% if u.role == r %}selected{% endif %}>{{ r|capitalize }}</option>
+              {% endfor %}
+            </select>
+            <select name="manager_id">
+              <option value="">-- No manager --</option>
+              {% for m in possible_managers %}
+                {% if m.id != u.id %}
+                <option value="{{ m.id }}" {% if u.manager_id == m.id %}selected{% endif %}>{{ m.full_name }} ({{ m.role|capitalize }})</option>
+                {% endif %}
+              {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-secondary">Save</button>
+          </form>
+        </td>
+        <td>
+          {% if u.id != current_user.id %}
+          <form method="post" action="{{ url_for('auth.remove_user', user_id=u.id) }}" style="display:inline"
+                onsubmit="return confirm('Remove this user\'s account?');">
+            <button type="submit" class="btn btn-danger">Remove</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 {% endblock %}
