@@ -23,12 +23,22 @@ class Config:
     MAIL_PASSWORD = os.environ.get("MAIL_PASSWORD")
     MAIL_DEFAULT_SENDER = os.environ.get("MAIL_USERNAME")
 
+    # ✅ NEW — document uploads for activities
+    # Stored OUTSIDE /static so files can't be fetched by guessing a URL;
+    # every download goes through the activity_document route, which checks role.
+    UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads", "activities")
+    MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB per upload
+
 
 # ---------------------------------------------------------------------------
 # Reference lists — mirrors the "Lists" sheet in the original workbook.
 # These drive every dropdown in the app. Add/remove items here if you need
 # to change the options, and they will update everywhere automatically.
 # ---------------------------------------------------------------------------
+
+ALLOWED_DOCUMENT_EXTENSIONS = {
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "png", "jpg", "jpeg"
+}
 
 SERVICE_AREAS = [
     "Partnership Development",

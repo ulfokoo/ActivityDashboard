@@ -14,21 +14,29 @@
   <div>
     <label>Select Staff</label>
     <select name="staff_id" onchange="this.form.submit()">
+      <option value="" {% if staff_id is none %}selected{% endif %}>Myself</option>
+      {% if visible_staff %}
+      <option value="0" {% if staff_id == 0 %}selected{% endif %}>-- All My Staff (Total) --</option>
+      {% endif %}
       {% for s in visible_staff %}
-      <option value="{{ s.id }}" {% if staff_id==s.id %}selected{% endif %}>{{ s.full_name }}</option>
+      <option value="{{ s.id }}" {% if staff_id==s.id %}selected{% endif %}>{{ s.full_name }} ({{ s.role|capitalize }})</option>
       {% endfor %}
     </select>
   </div>
 </form>
 
 {% if not visible_staff %}
-<p style="color:#b91c1c;">You have no staff reporting to you yet. Ask an admin to set you as their manager under "Manage Users."</p>
-{% else %}
+<p style="color:#b91c1c;">You have no staff reporting to you yet. Ask an admin to set you as their manager under "Manage Users." You can still manage your own targets below.</p>
+{% endif %}
+
+{% if staff_id == 0 %}
+<p style="color:#52606d;font-size:0.9rem;">Showing combined targets for all your staff. Select an individual (or "Myself") to add a new target.</p>
+{% endif %}
 
 {% for quarter in quarters %}
 <h2 class="section-title" id="{{ quarter }}">{{ quarter }}</h2>
 <form method="post">
-  <input type="hidden" name="staff_id" value="{{ staff_id }}">
+  <input type="hidden" name="staff_id" value="{{ '' if staff_id is none else staff_id }}">
   <table style="margin-bottom:12px;">
     <thead>
       <tr>
@@ -48,7 +56,7 @@
       </tr>
       {% endfor %}
 
-      {% if remaining_areas[quarter] %}
+      {% if can_add and remaining_areas[quarter] %}
       <tr>
         <td>
           <select name="new_area_{{ quarter }}">
@@ -70,5 +78,4 @@
 </form>
 {% endfor %}
 
-{% endif %}
 {% endblock %}

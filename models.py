@@ -131,7 +131,9 @@ class Activity(db.Model):
     where_location = db.Column(db.String(120))
     whom = db.Column(db.String(255))
     engagement_type = db.Column(db.String(80))
-    doc_link = db.Column(db.String(500))
+    doc_link = db.Column(db.String(500))  # kept for old records; no longer used by the form
+    document_filename = db.Column(db.String(255))       # sanitized name stored on disk
+    document_original_name = db.Column(db.String(255))  # original filename shown to users
     result_outcome = db.Column(db.Text)
     financial_result = db.Column(db.Float, default=0)
     future_plan = db.Column(db.Text)

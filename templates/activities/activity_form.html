@@ -3,7 +3,7 @@
 {% block content %}
 <h1>{{ title }}</h1>
 
-<form method="post" class="form-grid" novalidate>
+<form method="post" class="form-grid" novalidate enctype="multipart/form-data">
   {{ form.hidden_tag() }}
 
   <div>{{ form.date.label }} {{ form.date(type="date") }}</div>
@@ -16,7 +16,21 @@
   <div>{{ form.whom.label }} {{ form.whom() }}</div>
 
   <div>{{ form.engagement_type.label }} {{ form.engagement_type() }}</div>
-  <div>{{ form.doc_link.label }} {{ form.doc_link() }}</div>
+  <div>
+    {{ form.document.label }} {{ form.document() }}
+    {% if form.document.errors %}
+      <div class="field-error">{{ form.document.errors[0] }}</div>
+    {% endif %}
+    {% if activity is defined and activity and activity.document_filename %}
+      <div class="current-file">
+        Current file: {{ activity.document_original_name or activity.document_filename }}
+        {% if current_user.role in ("manager", "director", "vp", "admin") %}
+          — <a href="{{ url_for('activity_document', activity_id=activity.id) }}">Download</a>
+        {% endif %}
+        <br><small>Uploading a new file will replace this one.</small>
+      </div>
+    {% endif %}
+  </div>
 
   <div class="full">{{ form.result_outcome.label }} {{ form.result_outcome(rows=2) }}</div>
   <div>{{ form.financial_result.label }} {{ form.financial_result() }}</div>

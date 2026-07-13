@@ -71,6 +71,29 @@
       <td><span class="status-pill status-{{ a.status }}">{{ a.status }}</span></td>
       <td>{{ "%.0f"|format(a.financial_result or 0) }}</td>
       <td>
+        <button type="button" class="btn btn-secondary btn-view"
+                data-activity='{{ {
+                    "date": a.date.strftime("%d %b %Y") if a.date else "",
+                    "staff": a.user.full_name if a.user else "—",
+                    "service_area": a.service_area,
+                    "specific_activity": a.specific_activity,
+                    "description": a.description,
+                    "where_location": a.where_location,
+                    "whom": a.whom,
+                    "engagement_type": a.engagement_type,
+                    "has_document": (a.document_filename is not none),
+                    "document_name": a.document_original_name or a.document_filename or "",
+                    "document_url": (url_for('activity_document', activity_id=a.id) if a.document_filename and current_user.role in ("manager","director","vp","admin") else none),
+                    "can_view_document": (current_user.role in ("manager","director","vp","admin")),
+                    "result_outcome": a.result_outcome,
+                    "financial_result": "%.0f"|format(a.financial_result or 0),
+                    "future_plan": a.future_plan,
+                    "status": a.status,
+                    "responsible_org": a.responsible_org,
+                    "remarks": a.remarks
+                } | tojson }}'
+                onclick="openActivityModal(JSON.parse(this.getAttribute('data-activity')))">View</button>
+        &nbsp;
         <a href="{{ url_for('activity_edit', activity_id=a.id) }}">Edit</a>
         {% if current_user.is_admin %}
         &nbsp;
@@ -86,4 +109,127 @@
     {% endfor %}
   </tbody>
 </table>
+
+<!-- Activity Detail Modal -->
+<div id="activityModalBackdrop" class="modal-backdrop" onclick="closeActivityModal(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2>Activity Detail</h2>
+      <button type="button" class="modal-close" onclick="closeActivityModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <dl class="detail-grid">
+        <dt>Date</dt><dd id="m-date"></dd>
+        <dt>Staff</dt><dd id="m-staff"></dd>
+        <dt>Service Area</dt><dd id="m-service_area"></dd>
+        <dt>Activity</dt><dd id="m-specific_activity"></dd>
+        <dt>Description</dt><dd id="m-description"></dd>
+        <dt>Location</dt><dd id="m-where_location"></dd>
+        <dt>Whom</dt><dd id="m-whom"></dd>
+        <dt>Engagement Type</dt><dd id="m-engagement_type"></dd>
+        <dt>Attached Document</dt><dd id="m-document"></dd>
+        <dt>Result / Outcome</dt><dd id="m-result_outcome"></dd>
+        <dt>Financial Result (ETB)</dt><dd id="m-financial_result"></dd>
+        <dt>Future Plan</dt><dd id="m-future_plan"></dd>
+        <dt>Status</dt><dd id="m-status"></dd>
+        <dt>Responsible Org</dt><dd id="m-responsible_org"></dd>
+        <dt>Remarks</dt><dd id="m-remarks"></dd>
+      </dl>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" onclick="closeActivityModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.modal-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 1000;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px;
+  overflow-y: auto;
+}
+.modal-backdrop.open { display: flex; }
+.modal-box {
+  background: #fff;
+  border-radius: 8px;
+  max-width: 700px;
+  width: 100%;
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e5e5;
+}
+.modal-header h2 { margin: 0; font-size: 18px; }
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  color: #666;
+}
+.modal-body { padding: 20px; overflow-y: auto; }
+.modal-footer {
+  padding: 12px 20px;
+  border-top: 1px solid #e5e5e5;
+  text-align: right;
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  row-gap: 10px;
+  column-gap: 12px;
+  margin: 0;
+}
+.detail-grid dt { font-weight: 600; color: #444; }
+.detail-grid dd { margin: 0; word-break: break-word; }
+</style>
+
+<script>
+function openActivityModal(data) {
+  const docEl = document.getElementById('m-document');
+  if (docEl) {
+    if (data.has_document && data.can_view_document && data.document_url) {
+      docEl.innerHTML = '<a href="' + data.document_url + '" target="_blank" rel="noopener">' + (data.document_name || 'View document') + '</a>';
+    } else if (data.has_document) {
+      docEl.textContent = data.document_name || 'Attached (no permission to view)';
+    } else {
+      docEl.textContent = '—';
+    }
+  }
+
+  for (const key in data) {
+    if (key === 'has_document' || key === 'document_name' || key === 'document_url' || key === 'can_view_document') {
+      continue; // handled above
+    }
+    const el = document.getElementById('m-' + key);
+    if (!el) continue;
+    el.textContent = data[key] || '—';
+  }
+  document.getElementById('activityModalBackdrop').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeActivityModal(event) {
+  document.getElementById('activityModalBackdrop').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeActivityModal();
+});
+</script>
 {% endblock %}

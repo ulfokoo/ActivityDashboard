@@ -1,4 +1,5 @@
 from flask_wtf import FlaskForm
+from flask_wtf.file import FileField, FileAllowed
 from wtforms import (
     StringField, TextAreaField, DateField, FloatField,
     SelectField, SubmitField, PasswordField, BooleanField,
@@ -73,7 +74,10 @@ class ActivityForm(FlaskForm):
         choices=_choices(config.ENGAGEMENT_TYPES),
         validators=[Optional()],
     )
-    doc_link = StringField("Document / Reference Link", validators=[Optional(), Length(max=500)])
+    document = FileField(
+        "Attach Document",
+        validators=[Optional(), FileAllowed(config.ALLOWED_DOCUMENT_EXTENSIONS, "Unsupported file type.")],
+    )
     result_outcome = TextAreaField("Result / Outcome", validators=[Optional()])
     financial_result = FloatField("Financial Result (ETB)", validators=[Optional()], default=0)
     future_plan = TextAreaField("Future Plan / Next Steps", validators=[Optional()])

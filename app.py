@@ -1,7 +1,9 @@
+import os
 import secrets
+import uuid
+from werkzeug.utils import secure_filename
 from datetime import date, datetime
-
-from flask import Flask, app, render_template, redirect, url_for, request, flash
+from flask import Flask, app, render_template, redirect, url_for, request, flash, abort, send_from_directory
 from flask_login import LoginManager, login_required, current_user
 from sqlalchemy import func
 
@@ -14,6 +16,7 @@ from models import (
 from forms import ActivityForm, TargetForm
 from auth import auth_bp, admin_required
 from extensions import mail
+
 
 login_manager = LoginManager()
 login_manager.login_view = "auth.login"
@@ -43,10 +46,12 @@ def create_app():
         db.create_all()
         _ensure_user_columns()
         _ensure_service_area_columns()
+        _ensure_activity_columns()
         _seed_if_empty()
         _seed_default_admin()
         _seed_service_areas_if_empty()
-
+ 
+    os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True) 
     register_routes(app)
     return app
 
@@ -101,6 +106,24 @@ def _ensure_service_area_columns():
             if col not in existing:
                 try:
                     conn.execute(text(f"ALTER TABLE service_areas ADD COLUMN {col} {coltype}"))
+                except Exception as e:
+                    print(f"Column migration skipped/failed: {e}")
+        conn.commit()
+def _ensure_activity_columns():
+    from sqlalchemy import text, inspect
+
+    columns_to_add = {
+        "document_filename": "VARCHAR(255)",
+        "document_original_name": "VARCHAR(255)",
+    }
+
+    with db.engine.connect() as conn:
+        inspector = inspect(db.engine)
+        existing = {col["name"] for col in inspector.get_columns("activities")}
+        for col, coltype in columns_to_add.items():
+            if col not in existing:
+                try:
+                    conn.execute(text(f"ALTER TABLE activities ADD COLUMN {col} {coltype}"))
                 except Exception as e:
                     print(f"Column migration skipped/failed: {e}")
         conn.commit()
@@ -383,6 +406,10 @@ def register_routes(app: Flask):
             a = Activity()
             a.set_date(form.date.data)
             _apply_form(a, form)
+            saved_name, original_name = _save_uploaded_document(form.document.data)
+            if saved_name:
+                a.document_filename = saved_name
+                a.document_original_name = original_name
             a.user_id = current_user.id
             db.session.add(a)
             db.session.commit()
@@ -402,11 +429,30 @@ def register_routes(app: Flask):
         if form.validate_on_submit():
             a.set_date(form.date.data)
             _apply_form(a, form)
+            saved_name, original_name = _save_uploaded_document(form.document.data)
+            if saved_name:
+                a.document_filename = saved_name
+                a.document_original_name = original_name
             db.session.commit()
             flash("Activity updated.", "success")
             return redirect(url_for("activity_list"))
-        return render_template("activities/activity_form.html", form=form, title="Edit Activity")
-
+        return render_template("activities/activity_form.html", form=form, title="Edit Activity", activity=a)
+    
+    @app.route("/activities/<int:activity_id>/document")
+    @login_required
+    def activity_document(activity_id):
+        if current_user.role not in ("manager", "director", "vp", "admin"):
+            abort(403)
+        a = Activity.query.get_or_404(activity_id)
+        if not a.document_filename:
+            abort(404)
+        return send_from_directory(
+            app.config["UPLOAD_FOLDER"],
+            a.document_filename,
+            as_attachment=True,
+            download_name=a.document_original_name or a.document_filename,
+        )
+    
     @app.route("/activities/<int:activity_id>/delete", methods=["POST"])
     @login_required
     @admin_required
@@ -416,7 +462,19 @@ def register_routes(app: Flask):
         db.session.commit()
         flash("Activity deleted.", "info")
         return redirect(url_for("activity_list"))
+    
 
+    
+    def _save_uploaded_document(file_storage):
+        """Saves an uploaded FileStorage with a collision-proof name.
+        Returns (saved_filename, original_filename) or (None, None) if no file."""
+        if not file_storage or not file_storage.filename:
+            return None, None
+        original_name = secure_filename(file_storage.filename)
+        ext = original_name.rsplit(".", 1)[-1].lower() if "." in original_name else ""
+        saved_name = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
+        file_storage.save(os.path.join(app.config["UPLOAD_FOLDER"], saved_name))
+        return saved_name, original_name
     def _apply_form(a: Activity, form: ActivityForm):
         a.service_area = form.service_area.data
         a.specific_activity = form.specific_activity.data
@@ -424,7 +482,6 @@ def register_routes(app: Flask):
         a.where_location = form.where_location.data
         a.whom = form.whom.data
         a.engagement_type = form.engagement_type.data
-        a.doc_link = form.doc_link.data
         a.result_outcome = form.result_outcome.data
         a.financial_result = form.financial_result.data or 0
         a.future_plan = form.future_plan.data
@@ -675,7 +732,16 @@ def register_routes(app: Flask):
             return redirect(url_for("dashboard"))
 
         year = request.args.get("year", type=int, default=calc_fiscal_year(date.today()))
-        staff_id = request.args.get("staff_id", type=int)
+
+        # staff_id: "" -> Myself (None), "0" -> All My Staff, else a numeric id
+        def _parse_staff_id(raw):
+            if raw == "":
+                return None
+            if raw.lstrip("-").isdigit():
+                return int(raw)
+            return None
+
+        staff_id = _parse_staff_id(request.args.get("staff_id", ""))
 
         if current_user.role == "admin":
             visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
@@ -687,35 +753,52 @@ def register_routes(app: Flask):
             visible_staff = [u for u in all_subordinates if u.role == target_role]
         visible_ids = {u.id for u in visible_staff}
 
-        # If the caller didn't pick a staff member explicitly (e.g. dropdown only
-        # had one option, so onchange never fired), default to the first visible
-        # staff member so the hidden staff_id field isn't left blank.
-        if staff_id is None and visible_staff:
-            staff_id = visible_staff[0].id
-
         if not visible_staff and current_user.role != "admin":
             flash("You have no staff reporting to you yet.", "info")
 
+        # Fall back to "Myself" if an invalid/unauthorized id sneaks into the URL.
+        if staff_id is not None and staff_id != 0 and staff_id not in visible_ids:
+            staff_id = None
+
+        def _recipient_for(selected):
+            """Who an 'Add' action should assign a target to, given the selection."""
+            if selected == 0:
+                return None  # "All My Staff" — Add is disabled for this view
+            if selected is None:
+                return current_user.id
+            if selected in visible_ids:
+                return selected
+            return current_user.id
+
         if request.method == "POST":
             form = request.form
+            posted_staff_id_raw = form.get("staff_id", "")
+            posted_selected = _parse_staff_id(posted_staff_id_raw)
+            posted_recipient = _recipient_for(posted_selected)
+
+            def _back(anchor=""):
+                return redirect(url_for("targets", year=year, staff_id=posted_staff_id_raw) + anchor)
 
             # 1) Remove
-            posted_staff_id = form.get("staff_id", type=int)
             remove_key = next((k for k in form if k.startswith("remove_")), None)
             if remove_key:
                 target_id = int(remove_key.split("_", 1)[1])
                 t = Target.query.get(target_id)
-                if t and (current_user.role == "admin" or t.user_id in visible_ids):
+                allowed = t and (
+                    current_user.role == "admin"
+                    or t.user_id in visible_ids
+                    or t.user_id == current_user.id
+                )
+                if allowed:
                     quarter = t.quarter
                     db.session.delete(t)
                     db.session.commit()
                     flash("Target removed.", "success")
-                    return redirect(url_for("targets", year=year, staff_id=posted_staff_id) + f"#{quarter}")
+                    return _back(f"#{quarter}")
                 flash("Not authorized to remove that target.", "danger")
-                return redirect(url_for("targets", year=year, staff_id=posted_staff_id))
+                return _back()
 
-            # 2) Add — staff comes from the top filter (posted_staff_id), applies per quarter
-            posted_staff_id = form.get("staff_id", type=int)
+            # 2) Add — assigned to posted_recipient
             add_key = next((k for k in form if k.startswith("add_")), None)
             if add_key:
                 quarter = add_key.split("_", 1)[1]
@@ -723,24 +806,32 @@ def register_routes(app: Flask):
                 count = form.get(f"new_count_{quarter}", 0, type=float)
                 etb = form.get(f"new_etb_{quarter}", 0, type=float)
 
-                if current_user.role != "admin" and posted_staff_id not in visible_ids:
-                    flash("Not authorized to assign targets to that person.", "danger")
-                    return redirect(url_for("targets", year=year, staff_id=posted_staff_id) + f"#{quarter}")
+                if posted_recipient is None:
+                    flash("Select an individual staff member (or Myself) before adding a target.", "danger")
+                    return _back(f"#{quarter}")
 
-                if posted_staff_id and service_area:
+                if (
+                    posted_recipient != current_user.id
+                    and posted_recipient not in visible_ids
+                    and current_user.role != "admin"
+                ):
+                    flash("Not authorized to assign targets to that person.", "danger")
+                    return _back(f"#{quarter}")
+
+                if service_area:
                     existing = Target.query.filter_by(
-                        year=year, quarter=quarter, service_area=service_area, user_id=posted_staff_id
+                        year=year, quarter=quarter, service_area=service_area, user_id=posted_recipient
                     ).first()
                     if existing:
                         flash("That staff member already has a target for this Service Area/quarter.", "info")
                     else:
                         db.session.add(Target(
                             year=year, quarter=quarter, service_area=service_area,
-                            user_id=posted_staff_id, target_count=count or 0, target_etb=etb or 0,
+                            user_id=posted_recipient, target_count=count or 0, target_etb=etb or 0,
                         ))
                         db.session.commit()
                         flash("Target added.", "success")
-                return redirect(url_for("targets", year=year, staff_id=posted_staff_id) + f"#{quarter}")
+                return _back(f"#{quarter}")
 
             # 3) Bulk save
             last_quarter = None
@@ -748,7 +839,12 @@ def register_routes(app: Flask):
                 if key.startswith("count_") or key.startswith("etb_"):
                     kind, target_id = key.split("_", 1)
                     t = Target.query.get(int(target_id))
-                    if t and (current_user.role == "admin" or t.user_id in visible_ids):
+                    allowed = t and (
+                        current_user.role == "admin"
+                        or t.user_id in visible_ids
+                        or t.user_id == current_user.id
+                    )
+                    if allowed:
                         try:
                             num = float(value) if value not in ("", None) else 0
                         except ValueError:
@@ -760,23 +856,25 @@ def register_routes(app: Flask):
                         last_quarter = t.quarter
             db.session.commit()
             flash("Targets saved.", "success")
-            anchor = f"#{last_quarter}" if last_quarter else ""
-            return redirect(url_for("targets", year=year, staff_id=posted_staff_id) + anchor)
+            return _back(f"#{last_quarter}" if last_quarter else "")
 
-      # ---- GET ----
+        # ---- GET ----
+        if staff_id == 0:
+            filter_ids = list(visible_ids) if visible_ids else [current_user.id]
+        elif staff_id is None:
+            filter_ids = [current_user.id]
+        else:
+            filter_ids = [staff_id]
+
         quarter_rows = {}
         remaining_areas = {}
         for quarter in config.QUARTERS:
             areas = _quarter_service_areas(year, quarter)
-            q = Target.query.filter(Target.year == year, Target.quarter == quarter)
-            if current_user.role != "admin":
-                q = q.filter(Target.user_id.in_(visible_ids or [-1]))
-            if staff_id:
-                q = q.filter(Target.user_id == staff_id)
-            all_targets_this_q = q.order_by(Target.service_area).all()
-            quarter_rows[quarter] = all_targets_this_q
-            used = {t.service_area for t in all_targets_this_q}
-            remaining_areas[quarter] = areas  # staff can repeat a Service Area for different people
+            q = Target.query.filter(
+                Target.year == year, Target.quarter == quarter, Target.user_id.in_(filter_ids)
+            )
+            quarter_rows[quarter] = q.order_by(Target.service_area).all()
+            remaining_areas[quarter] = areas
 
         return render_template(
             "targets.html",
@@ -787,7 +885,9 @@ def register_routes(app: Flask):
             visible_staff=visible_staff,
             years=config.YEARS,
             staff_id=staff_id,
+            can_add=(staff_id != 0),
         )
+
     # ------------------------------------------------------------------
     # Annual Dashboard (mirrors "Annual Dashboard" sheet)
     # ------------------------------------------------------------------
