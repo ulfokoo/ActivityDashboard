@@ -37,7 +37,8 @@
   <div>
     <label>Staff</label>
     <select name="staff_id">
-      <option value="">-- All My Staff (Total) --</option>
+      <option value="" {% if staff_id is none %}selected{% endif %}>-- All My Staff (Total) --</option>
+      <option value="me" {% if staff_id=='me' %}selected{% endif %}>Myself Only</option>
       {% for s in visible_staff %}
       <option value="{{ s.id }}" {% if staff_id==s.id %}selected{% endif %}>{{ s.full_name }}</option>
       {% endfor %}

@@ -321,7 +321,16 @@ def register_routes(app: Flask):
         month = request.args.get("month")
         status = request.args.get("status")
         service_area = request.args.get("service_area")
-        staff_id = request.args.get("staff_id", type=int)
+
+        # staff_id can be a numeric id, the literal "me", or absent/blank
+        # ("All My Staff (Total)" — the historical default for this page).
+        staff_id_param = request.args.get("staff_id", "")
+        if staff_id_param == "me":
+            staff_id = "me"
+        elif staff_id_param.isdigit():
+            staff_id = int(staff_id_param)
+        else:
+            staff_id = None
 
         if current_user.role == "admin":
             visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
@@ -331,7 +340,9 @@ def register_routes(app: Flask):
             visible_staff = []
         visible_ids = {u.id for u in visible_staff}
 
-        if staff_id and staff_id in visible_ids:
+        if staff_id == "me":
+            filter_ids = [current_user.id]
+        elif staff_id and staff_id in visible_ids:
             filter_ids = [staff_id]
         elif current_user.role == "admin":
             filter_ids = None
@@ -439,10 +450,10 @@ def register_routes(app: Flask):
             visible_staff = []
         visible_ids = {u.id for u in visible_staff}
 
-        if staff_id and staff_id in visible_ids:
-            filter_ids = [staff_id]
-        elif current_user.role in ("admin", "manager", "director", "vp"):
+        if staff_id == 0:
             filter_ids = list(visible_ids) if visible_ids else [current_user.id]
+        elif staff_id and staff_id in visible_ids:
+            filter_ids = [staff_id]
         else:
             filter_ids = [current_user.id]
 
@@ -497,10 +508,10 @@ def register_routes(app: Flask):
             visible_staff = []
         visible_ids = {u.id for u in visible_staff}
 
-        if staff_id and staff_id in visible_ids:
-            filter_ids = [staff_id]
-        elif current_user.role in ("admin", "manager", "director", "vp"):
+        if staff_id == 0:
             filter_ids = list(visible_ids) if visible_ids else [current_user.id]
+        elif staff_id and staff_id in visible_ids:
+            filter_ids = [staff_id]
         else:
             filter_ids = [current_user.id]
 
@@ -552,9 +563,22 @@ def register_routes(app: Flask):
 
         year = request.args.get("year", type=int, default=calc_fiscal_year(date.today()))
         quarter = request.args.get("quarter", default=calc_quarter(date.today()))
+        staff_id = request.args.get("staff_id", type=int)
 
-        # ✅ current logged-in user
-        user_id = current_user.id
+        if current_user.role == "admin":
+            visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
+        elif current_user.role in ("manager", "director", "vp"):
+            visible_staff = get_all_subordinates(current_user)
+        else:
+            visible_staff = []
+        visible_ids = {u.id for u in visible_staff}
+
+        if staff_id == 0:
+            filter_ids = list(visible_ids) if visible_ids else [current_user.id]
+        elif staff_id and staff_id in visible_ids:
+            filter_ids = [staff_id]
+        else:
+            filter_ids = [current_user.id]
 
         rows = []
         total_target_count = 0
@@ -567,14 +591,14 @@ def register_routes(app: Flask):
 
         for sa in active_areas:
 
-            # ✅ TARGETS
+            # TARGETS
             target_count = db.session.query(
                 func.coalesce(func.sum(Target.target_count), 0)
             ).filter(
                 Target.year == year,
                 Target.quarter == quarter,
                 Target.service_area == sa,
-                Target.user_id == user_id
+                Target.user_id.in_(filter_ids)
             ).scalar()
 
             target_etb = db.session.query(
@@ -583,15 +607,15 @@ def register_routes(app: Flask):
                 Target.year == year,
                 Target.quarter == quarter,
                 Target.service_area == sa,
-                Target.user_id == user_id
+                Target.user_id.in_(filter_ids)
             ).scalar()
 
-            # ✅ ACTUALS (FIXED: use user_id, NOT staff_id)
+            # ACTUALS
             actual_q = Activity.query.filter(
                 Activity.fiscal_year == year,
                 Activity.quarter == quarter,
                 Activity.service_area == sa,
-                Activity.user_id == user_id
+                Activity.user_id.in_(filter_ids)
             )
 
             actual_count = actual_q.count()
@@ -602,7 +626,7 @@ def register_routes(app: Flask):
                 Activity.fiscal_year == year,
                 Activity.quarter == quarter,
                 Activity.service_area == sa,
-                Activity.user_id == user_id
+                Activity.user_id.in_(filter_ids)
             ).scalar()
 
             rows.append({
@@ -636,7 +660,9 @@ def register_routes(app: Flask):
             rows=rows,
             totals=totals,
             years=config.YEARS,
-            quarters=config.QUARTERS
+            quarters=config.QUARTERS,
+            visible_staff=visible_staff,
+            staff_id=staff_id,
         )
     # ------------------------------------------------------------------
     # Targets — data entry screen (mirrors "Targets" sheet)
@@ -779,10 +805,10 @@ def register_routes(app: Flask):
             visible_staff = []
         visible_ids = {u.id for u in visible_staff}
 
-        if staff_id and staff_id in visible_ids:
-            filter_ids = [staff_id]
-        elif current_user.role in ("admin", "manager", "director", "vp"):
+        if staff_id == 0:
             filter_ids = list(visible_ids) if visible_ids else [current_user.id]
+        elif staff_id and staff_id in visible_ids:
+            filter_ids = [staff_id]
         else:
             filter_ids = [current_user.id]
 

@@ -14,7 +14,8 @@
   <div>
     <label>Select Staff</label>
     <select name="staff_id" onchange="this.form.submit()">
-      <option value="">-- All My Staff (Total) --</option>
+      <option value="" {% if staff_id is none %}selected{% endif %}>Myself</option>
+      <option value="0" {% if staff_id == 0 %}selected{% endif %}>-- All My Staff (Total) --</option>
       {% for s in visible_staff %}
       <option value="{{ s.id }}" {% if staff_id==s.id %}selected{% endif %}>{{ s.full_name }}</option>
       {% endfor %}

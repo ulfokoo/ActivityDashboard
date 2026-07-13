@@ -6,7 +6,8 @@
   <div>
     <label>View Staff</label>
     <select name="staff_id" onchange="this.form.submit()">
-      <option value="0">All Staff (Combined)</option>
+      <option value="" {% if not selected_staff and request.args.get('staff_id') != '0' %}selected{% endif %}>Myself</option>
+      <option value="0" {% if request.args.get('staff_id') == '0' %}selected{% endif %}>All Staff (Combined)</option>
       {% for s in staff_list %}
       <option value="{{ s.id }}" {% if selected_staff and selected_staff.id == s.id %}selected{% endif %}>
         {{ s.full_name }}
