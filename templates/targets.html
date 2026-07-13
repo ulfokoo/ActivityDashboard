@@ -24,12 +24,12 @@
 {% if not visible_staff %}
 <p style="color:#b91c1c;">You have no staff reporting to you yet. Ask an admin to set you as their manager under "Manage Users."</p>
 {% else %}
+
+{% for quarter in quarters %}
+<h2 class="section-title" id="{{ quarter }}">{{ quarter }}</h2>
 <form method="post">
   <input type="hidden" name="staff_id" value="{{ staff_id }}">
-
-  {% for quarter in quarters %}
-  <h2 class="section-title" id="{{ quarter }}">{{ quarter }}</h2>
-  <table style="margin-bottom:24px;">
+  <table style="margin-bottom:12px;">
     <thead>
       <tr>
         <th>Service Area</th>
@@ -65,9 +65,10 @@
       {% endif %}
     </tbody>
   </table>
-  {% endfor %}
 
-  <button type="submit" class="btn">Save All Targets</button>
+  <button type="submit" class="btn" style="margin-bottom:24px;">Save {{ quarter }}</button>
 </form>
+{% endfor %}
+
 {% endif %}
 {% endblock %}
