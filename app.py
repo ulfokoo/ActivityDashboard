@@ -336,7 +336,10 @@ def register_routes(app: Flask):
         elif current_user.role == "admin":
             filter_ids = None
         elif current_user.role in ("manager", "director", "vp"):
-            filter_ids = list(visible_ids) if visible_ids else [current_user.id]
+            # Include the manager's/director's/VP's own activities too, not
+            # just their subordinates', so their own entries don't disappear
+            # from their own Activity Log.
+            filter_ids = list(visible_ids | {current_user.id})
         else:
             filter_ids = [current_user.id]
 
@@ -369,6 +372,7 @@ def register_routes(app: Flask):
             a = Activity()
             a.set_date(form.date.data)
             _apply_form(a, form)
+            a.user_id = current_user.id
             db.session.add(a)
             db.session.commit()
             flash("Activity added.", "success")
@@ -454,8 +458,11 @@ def register_routes(app: Flask):
                 .filter(Activity.year == year, Activity.month == month, Activity.user_id.in_(filter_ids)).scalar(),
         )
 
+        active_areas = [a.name for a in ServiceArea.query.filter_by(is_active=True)
+                         .order_by(ServiceArea.sort_order, ServiceArea.name).all()]
+
         breakdown = []
-        for sa in [s for s in config.SERVICE_AREAS if s != "Other"]:
+        for sa in active_areas:
             rows = base.filter(Activity.service_area == sa)
             breakdown.append(dict(
                 service_area=sa,
@@ -510,8 +517,11 @@ def register_routes(app: Flask):
                         Activity.user_id.in_(filter_ids)).scalar(),
         )
 
+        active_areas = [a.name for a in ServiceArea.query.filter_by(is_active=True)
+                         .order_by(ServiceArea.sort_order, ServiceArea.name).all()]
+
         breakdown = []
-        for sa in [s for s in config.SERVICE_AREAS if s != "Other"]:
+        for sa in active_areas:
             rows = base.filter(Activity.service_area == sa)
             breakdown.append(dict(
                 service_area=sa,
@@ -552,7 +562,10 @@ def register_routes(app: Flask):
         total_target_etb = 0
         total_actual_etb = 0
 
-        for sa in [s for s in config.SERVICE_AREAS if s != "Other"]:
+        active_areas = [a.name for a in ServiceArea.query.filter_by(is_active=True)
+                         .order_by(ServiceArea.sort_order, ServiceArea.name).all()]
+
+        for sa in active_areas:
 
             # ✅ TARGETS
             target_count = db.session.query(
@@ -654,12 +667,6 @@ def register_routes(app: Flask):
         if staff_id is None and visible_staff:
             staff_id = visible_staff[0].id
 
-        print("DEBUG current_user:", current_user.full_name, repr(current_user.role))
-        print("DEBUG target_role:", repr(ASSIGNABLE_ROLE.get(current_user.role)))
-        print("DEBUG visible_staff:", [(u.full_name, repr(u.role), u.id) for u in visible_staff])
-        print("DEBUG visible_ids:", visible_ids)
-        print("DEBUG staff_id (GET):", staff_id)
-
         if not visible_staff and current_user.role != "admin":
             flash("You have no staff reporting to you yet.", "info")
 
@@ -689,10 +696,6 @@ def register_routes(app: Flask):
                 service_area = form.get(f"new_area_{quarter}")
                 count = form.get(f"new_count_{quarter}", 0, type=float)
                 etb = form.get(f"new_etb_{quarter}", 0, type=float)
-
-                print("DEBUG posted_staff_id (POST):", posted_staff_id, type(posted_staff_id))
-                print("DEBUG visible_ids at check time:", visible_ids)
-                print("DEBUG is posted_staff_id in visible_ids?:", posted_staff_id in visible_ids)
 
                 if current_user.role != "admin" and posted_staff_id not in visible_ids:
                     flash("Not authorized to assign targets to that person.", "danger")
@@ -793,8 +796,11 @@ def register_routes(app: Flask):
                 .filter(Activity.fiscal_year == year, Activity.user_id.in_(filter_ids)).scalar(),
         )
 
+        active_areas = [a.name for a in ServiceArea.query.filter_by(is_active=True)
+                         .order_by(ServiceArea.sort_order, ServiceArea.name).all()]
+
         matrix = []
-        for sa in [s for s in config.SERVICE_AREAS if s != "Other"]:
+        for sa in active_areas:
             row = {"service_area": sa, "months": [], "total": 0}
             for m in config.FISCAL_MONTHS:
                 c = Activity.query.filter(Activity.fiscal_year == year, Activity.service_area == sa,
