@@ -70,6 +70,15 @@ def get_all_subordinates(user):
 # areas created by their own role or a role below them, never above.
 ROLE_RANK = {"staff": 0, "manager": 1, "director": 2, "vp": 3, "admin": 4}
 
+# Maps a user's role to the role whose targets they're allowed to manage.
+# e.g. a manager sets targets for staff, a director sets targets for
+# managers, etc. Adjust the mapping to match your actual hierarchy.
+ASSIGNABLE_ROLE = {
+    "admin": "vp",
+    "vp": "director",
+    "director": "manager",
+    "manager": "staff",
+}
 
 def can_manage_service_area(user, area) -> bool:
     """True if `user` is allowed to rename/delete `area`."""

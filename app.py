@@ -6,7 +6,11 @@ from flask_login import LoginManager, login_required, current_user
 from sqlalchemy import func
 
 import config
-from models import db, Activity, Target, User, ServiceArea, QuarterServiceArea, calc_quarter, calc_fiscal_year, get_all_subordinates
+from models import (
+    db, Activity, Target, User, ServiceArea, QuarterServiceArea,
+    calc_quarter, calc_fiscal_year, get_all_subordinates,
+    ASSIGNABLE_ROLE, can_manage_service_area,
+)
 from forms import ActivityForm, TargetForm
 from auth import auth_bp, admin_required
 from extensions import mail
@@ -241,6 +245,25 @@ def _quarter_service_areas(year, quarter):
         db.session.commit()
         existing = QuarterServiceArea.query.filter_by(year=year, quarter=quarter).all()
     return [q.service_area for q in existing]
+
+
+def _propagate_new_service_area_to_quarters(area_name):
+    """
+    When a new Service Area is added, push it into every year/quarter that
+    has already been seeded, so it shows up in the Targets dropdown right
+    away instead of only appearing the next time a fresh quarter is viewed.
+    """
+    seeded_quarters = db.session.query(
+        QuarterServiceArea.year, QuarterServiceArea.quarter
+    ).distinct().all()
+
+    for year, quarter in seeded_quarters:
+        exists = QuarterServiceArea.query.filter_by(
+            year=year, quarter=quarter, service_area=area_name
+        ).first()
+        if not exists:
+            db.session.add(QuarterServiceArea(year=year, quarter=quarter, service_area=area_name))
+    db.session.commit()
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -602,9 +625,6 @@ def register_routes(app: Flask):
             years=config.YEARS,
             quarters=config.QUARTERS
         )
-# ------------------------------------------------------------------
-    # Targets — data entry screen (mirrors "Targets" sheet)
-    # ------------------------------------------------------------------
     # ------------------------------------------------------------------
     # Targets — data entry screen (mirrors "Targets" sheet)
     # ------------------------------------------------------------------
@@ -621,8 +641,24 @@ def register_routes(app: Flask):
         if current_user.role == "admin":
             visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
         else:
-            visible_staff = get_all_subordinates(current_user)
+            # Restrict target assignment to exactly one level down:
+            # VP -> Director, Director -> Manager, Manager -> Staff
+            target_role = ASSIGNABLE_ROLE.get(current_user.role)
+            all_subordinates = get_all_subordinates(current_user)
+            visible_staff = [u for u in all_subordinates if u.role == target_role]
         visible_ids = {u.id for u in visible_staff}
+
+        # If the caller didn't pick a staff member explicitly (e.g. dropdown only
+        # had one option, so onchange never fired), default to the first visible
+        # staff member so the hidden staff_id field isn't left blank.
+        if staff_id is None and visible_staff:
+            staff_id = visible_staff[0].id
+
+        print("DEBUG current_user:", current_user.full_name, repr(current_user.role))
+        print("DEBUG target_role:", repr(ASSIGNABLE_ROLE.get(current_user.role)))
+        print("DEBUG visible_staff:", [(u.full_name, repr(u.role), u.id) for u in visible_staff])
+        print("DEBUG visible_ids:", visible_ids)
+        print("DEBUG staff_id (GET):", staff_id)
 
         if not visible_staff and current_user.role != "admin":
             flash("You have no staff reporting to you yet.", "info")
@@ -653,6 +689,10 @@ def register_routes(app: Flask):
                 service_area = form.get(f"new_area_{quarter}")
                 count = form.get(f"new_count_{quarter}", 0, type=float)
                 etb = form.get(f"new_etb_{quarter}", 0, type=float)
+
+                print("DEBUG posted_staff_id (POST):", posted_staff_id, type(posted_staff_id))
+                print("DEBUG visible_ids at check time:", visible_ids)
+                print("DEBUG is posted_staff_id in visible_ids?:", posted_staff_id in visible_ids)
 
                 if current_user.role != "admin" and posted_staff_id not in visible_ids:
                     flash("Not authorized to assign targets to that person.", "danger")
@@ -703,7 +743,7 @@ def register_routes(app: Flask):
             if current_user.role != "admin":
                 q = q.filter(Target.user_id.in_(visible_ids or [-1]))
             if staff_id:
-                q = q.filter(Target.user_id == staff_id) 
+                q = q.filter(Target.user_id == staff_id)
             all_targets_this_q = q.order_by(Target.service_area).all()
             quarter_rows[quarter] = all_targets_this_q
             used = {t.service_area for t in all_targets_this_q}
@@ -719,7 +759,6 @@ def register_routes(app: Flask):
             years=config.YEARS,
             staff_id=staff_id,
         )
-        
     # ------------------------------------------------------------------
     # Annual Dashboard (mirrors "Annual Dashboard" sheet)
     # ------------------------------------------------------------------
@@ -767,8 +806,9 @@ def register_routes(app: Flask):
         return render_template("annual.html", year=year, summary=summary, matrix=matrix,
                                 fiscal_months=config.FISCAL_MONTHS, years=config.YEARS,
                                 visible_staff=visible_staff, staff_id=staff_id)
-# ------------------------------------------------------------------
-    # Admin: manage Service Areas
+
+    # ------------------------------------------------------------------
+    # Manage Service Areas — Admin / Manager / Director / VP
     # ------------------------------------------------------------------
 
     @app.route("/admin/service-areas")
@@ -782,8 +822,11 @@ def register_routes(app: Flask):
 
     @app.route("/admin/service-areas/add", methods=["POST"])
     @login_required
-    @admin_required
     def service_area_add():
+        if current_user.role not in ("admin", "manager", "director", "vp"):
+            flash("Not authorized to add service areas.", "danger")
+            return redirect(url_for("service_area_list"))
+
         name = (request.form.get("name") or "").strip()
         if not name:
             flash("Name is required.", "danger")
@@ -791,16 +834,24 @@ def register_routes(app: Flask):
             flash("That service area already exists.", "danger")
         else:
             max_order = db.session.query(func.coalesce(func.max(ServiceArea.sort_order), 0)).scalar()
-            db.session.add(ServiceArea(name=name, is_active=True, sort_order=max_order + 1))
+            db.session.add(ServiceArea(
+                name=name, is_active=True, sort_order=max_order + 1,
+                created_by_id=current_user.id, created_by_role=current_user.role,
+            ))
             db.session.commit()
+            # Make it show up in every quarter's Targets dropdown right away
+            _propagate_new_service_area_to_quarters(name)
             flash("Service area added.", "success")
         return redirect(url_for("service_area_list"))
 
     @app.route("/admin/service-areas/<int:area_id>/rename", methods=["POST"])
     @login_required
-    @admin_required
     def service_area_rename(area_id):
         area = ServiceArea.query.get_or_404(area_id)
+        if not can_manage_service_area(current_user, area):
+            flash("Not authorized to rename this service area.", "danger")
+            return redirect(url_for("service_area_list"))
+
         new_name = (request.form.get("name") or "").strip()
         if not new_name:
             flash("Name is required.", "danger")
@@ -813,15 +864,18 @@ def register_routes(app: Flask):
         area.name = new_name
         Activity.query.filter_by(service_area=old_name).update({"service_area": new_name})
         Target.query.filter_by(service_area=old_name).update({"service_area": new_name})
+        QuarterServiceArea.query.filter_by(service_area=old_name).update({"service_area": new_name})
         db.session.commit()
         flash(f"Renamed '{old_name}' to '{new_name}' (existing records updated too).", "success")
         return redirect(url_for("service_area_list"))
 
     @app.route("/admin/service-areas/<int:area_id>/toggle", methods=["POST"])
     @login_required
-    @admin_required
     def service_area_toggle(area_id):
         area = ServiceArea.query.get_or_404(area_id)
+        if not can_manage_service_area(current_user, area):
+            flash("Not authorized to change this service area.", "danger")
+            return redirect(url_for("service_area_list"))
         area.is_active = not area.is_active
         db.session.commit()
         flash(f"'{area.name}' is now {'active' if area.is_active else 'inactive'}.", "info")
@@ -829,9 +883,12 @@ def register_routes(app: Flask):
 
     @app.route("/admin/service-areas/<int:area_id>/delete", methods=["POST"])
     @login_required
-    @admin_required
     def service_area_delete(area_id):
         area = ServiceArea.query.get_or_404(area_id)
+        if not can_manage_service_area(current_user, area):
+            flash("Not authorized to delete this service area.", "danger")
+            return redirect(url_for("service_area_list"))
+
         in_use = (Activity.query.filter_by(service_area=area.name).first()
                   or Target.query.filter_by(service_area=area.name).first())
         if in_use:
