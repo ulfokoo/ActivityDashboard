@@ -7,13 +7,26 @@ from wtforms import (
 from wtforms.validators import DataRequired, Optional, Length, Email, EqualTo
 
 import config
-from models import ServiceArea
+from models import ServiceArea, visible_service_area_owner_ids, db
+from flask_login import current_user
+from sqlalchemy import or_
 
 
 def _choices(options):
     return [(o, o) for o in options]
 def _active_service_area_choices():
-    areas = ServiceArea.query.filter_by(is_active=True).order_by(ServiceArea.sort_order, ServiceArea.name).all()
+    q = ServiceArea.query.filter_by(is_active=True)
+    if current_user.is_authenticated:
+        owner_ids = visible_service_area_owner_ids(current_user)
+        if owner_ids is not None:
+            conds = []
+            if None in owner_ids:
+                conds.append(ServiceArea.created_by_id.is_(None))
+            others = [o for o in owner_ids if o is not None]
+            if others:
+                conds.append(ServiceArea.created_by_id.in_(others))
+            q = q.filter(or_(*conds)) if conds else q.filter(db.false())
+    areas = q.order_by(ServiceArea.sort_order, ServiceArea.name).all()
     return [(a.name, a.name) for a in areas]
 
 

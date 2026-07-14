@@ -1,0 +1,193 @@
+{% if staff_groups.groups %}
+<div>
+  <label>View Staff</label>
+  <select name="__staff_top" id="staffTopSelect">
+    <option value="myself" {% if not selected_staff and request.args.get('staff_id') != '0' %}selected{% endif %}>Myself</option>
+    <option value="all" {% if request.args.get('staff_id') == '0' %}selected{% endif %}>All Staff (Combined)</option>
+    {% if staff_groups.level == "director" %}
+      {% for dg in staff_groups.groups %}
+      <option value="dir:{{ dg.director.id }}" {% if selected_staff and selected_staff.id == dg.director.id %}selected{% endif %}>
+        {{ dg.director.full_name }} (Director)
+      </option>
+      {% endfor %}
+    {% else %}
+      {% for mg in staff_groups.groups %}
+      <option value="mgr:{{ mg.manager.id }}" {% if selected_staff and selected_staff.id == mg.manager.id %}selected{% endif %}>
+        {{ mg.team_name }} — {{ mg.manager.full_name }} (Manager)
+      </option>
+      {% endfor %}
+    {% endif %}
+  </select>
+</div>
+
+<div id="staffMidWrap" style="display:none; margin-top:10px;">
+  <label>Manager</label>
+  <select id="staffMidSelect"></select>
+</div>
+
+<div id="staffBottomWrap" style="display:none; margin-top:10px;">
+  <label>Staff</label>
+  <select id="staffBottomSelect"></select>
+</div>
+
+<input type="hidden" name="staff_id" id="staffIdInput" value="{{ staff_id if staff_id is not none else '' }}">
+
+<script type="application/json" id="staffTreeData">{{ staff_groups.groups | tojson }}</script>
+<script type="application/json" id="staffSelectedIdData">{{ (selected_staff.id if selected_staff else 'null') | tojson }}</script>
+<script type="application/json" id="staffLevelData">{{ staff_groups.level | tojson }}</script>
+
+<script>
+(function() {
+  const level = JSON.parse(document.getElementById('staffLevelData').textContent);
+  const tree = JSON.parse(document.getElementById('staffTreeData').textContent);
+  const selectedId = JSON.parse(document.getElementById('staffSelectedIdData').textContent);
+
+  const topSelect = document.getElementById('staffTopSelect');
+  const midWrap = document.getElementById('staffMidWrap');
+  const midSelect = document.getElementById('staffMidSelect');
+  const bottomWrap = document.getElementById('staffBottomWrap');
+  const bottomSelect = document.getElementById('staffBottomSelect');
+  const staffIdInput = document.getElementById('staffIdInput');
+
+  function submitForm() {
+    const form = topSelect.closest('form');
+    if (form) form.submit();
+  }
+
+  function findDirector(dirId) {
+    return tree.find(dg => dg.director.id === dirId);
+  }
+  function findManagerGroups() {
+    // when level is "manager", tree itself is the flat manager_groups list
+    return tree;
+  }
+
+function populateMidFromDirector(dirId) {
+  const dg = findDirector(dirId);
+  midSelect.innerHTML = '';
+  if (!dg) return;
+
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = '-- Select a Manager (optional) --';
+  midSelect.appendChild(placeholder);
+
+  dg.manager_groups.forEach(mg => {
+    const opt = document.createElement('option');
+    opt.value = 'mgr:' + mg.manager.id;
+    opt.textContent = mg.team_name + ' — ' + mg.manager.full_name + ' (Manager)';
+    midSelect.appendChild(opt);
+  });
+  midWrap.style.display = dg.manager_groups.length ? 'block' : 'none';
+  bottomWrap.style.display = 'none';
+  bottomSelect.innerHTML = '';
+}
+
+  function populateBottomFromManager(managerGroups, managerId) {
+  const mg = managerGroups.find(g => g.manager.id === managerId);
+  bottomSelect.innerHTML = '';
+  if (!mg) return;
+
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = '-- Select a Staff member (optional) --';
+  bottomSelect.appendChild(placeholder);
+
+  mg.staff.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = 'staff:' + s.id;
+    opt.textContent = s.full_name + ' (' + s.role.charAt(0).toUpperCase() + s.role.slice(1) + ')';
+    bottomSelect.appendChild(opt);
+  });
+  bottomWrap.style.display = mg.staff.length ? 'block' : 'none';
+}
+
+  topSelect.addEventListener('change', function() {
+    const val = topSelect.value;
+    if (val === 'myself') {
+      staffIdInput.value = '';
+      submitForm();
+    } else if (val === 'all') {
+      staffIdInput.value = '0';
+      submitForm();
+    } else if (val.startsWith('dir:')) {
+      const dirId = parseInt(val.split(':')[1], 10);
+      staffIdInput.value = dirId;
+      if (level === 'director') {
+        populateMidFromDirector(dirId);
+      }
+      submitForm();
+    } else if (val.startsWith('mgr:')) {
+  const mgrId = parseInt(val.split(':')[1], 10);
+  staffIdInput.value = mgrId;
+  if (level === 'manager') {
+    populateBottomFromManager(tree, mgrId);
+  }
+  submitForm();
+}
+  });
+
+  midSelect.addEventListener('change', function() {
+    const val = midSelect.value;
+    if (!val) return;  // placeholder chosen — do nothing, stay on director's own view
+    if (val.startsWith('mgr:')) {
+      const mgrId = parseInt(val.split(':')[1], 10);
+      staffIdInput.value = mgrId;
+      const dg = findDirector(parseInt(topSelect.value.split(':')[1], 10));
+      if (dg) populateBottomFromManager(dg.manager_groups, mgrId);
+      submitForm();
+    }
+  });
+
+  bottomSelect.addEventListener('change', function() {
+  const val = bottomSelect.value;
+  if (!val) return;  // placeholder chosen — do nothing, stay on manager's combined view
+  if (val.startsWith('staff:')) {
+    staffIdInput.value = parseInt(val.split(':')[1], 10);
+    submitForm();
+  }
+});
+
+ // Re-expand the correct levels on page load if something is already selected
+  if (selectedId !== null && level === 'director') {
+    const selfDg = tree.find(dg => dg.director.id === selectedId);
+    if (selfDg) {
+      topSelect.value = 'dir:' + selfDg.director.id;
+      populateMidFromDirector(selfDg.director.id);
+    } else {
+      for (const dg of tree) {
+        const mg = dg.manager_groups.find(m => m.manager.id === selectedId);
+        if (mg) {
+          topSelect.value = 'dir:' + dg.director.id;
+          populateMidFromDirector(dg.director.id);
+          midSelect.value = 'mgr:' + selectedId;
+          populateBottomFromManager(dg.manager_groups, selectedId);
+          break;
+        }
+        const staffMatch = dg.manager_groups.some(m => m.staff.some(s => s.id === selectedId));
+        if (staffMatch) {
+          topSelect.value = 'dir:' + dg.director.id;
+          populateMidFromDirector(dg.director.id);
+          const ownerMg = dg.manager_groups.find(m => m.staff.some(s => s.id === selectedId));
+          midSelect.value = 'mgr:' + ownerMg.manager.id;
+          populateBottomFromManager(dg.manager_groups, ownerMg.manager.id);
+          bottomSelect.value = 'staff:' + selectedId;
+          break;
+        }
+      }
+    }
+  } else if (selectedId !== null && level === 'manager') {
+    const mg = tree.find(m => m.manager.id === selectedId);
+    if (mg) {
+      populateBottomFromManager(tree, selectedId);
+    } else {
+      const ownerMg = tree.find(m => m.staff.some(s => s.id === selectedId));
+      if (ownerMg) {
+        populateBottomFromManager(tree, ownerMg.manager.id);
+        bottomSelect.value = 'staff:' + selectedId;
+      }
+    }
+  }
+  })();
+</script>
+{% endif %}

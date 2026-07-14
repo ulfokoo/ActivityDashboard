@@ -4,52 +4,185 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Coop Bank Activity Tracker{% endblock %}</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-<header class="topbar">
-  <div class="tagline-corner">
-    Simple Tracking, Better Insights<br>
-    Fast, Clear, Reliable — see where every service area stands.
-  </div>
-  <div class="brand">Activity Tracker</div>
-  <nav>
+
+<header class="app-header">
+  <div class="header-top">
+    <div class="brand-tagline">
+      <span class="tagline-main">Simple Tracking, Better Insights</span>
+      <span class="tagline-sub">Fast, Clear, Reliable — see where every service area stands.</span>
+    </div>
+
+    <h1 class="app-title"><i class="fa-solid fa-chart-line"></i> Activity Tracker</h1>
+
     {% if current_user.is_authenticated %}
-      <a href="{{ url_for('dashboard') }}">Dashboard</a>
-      <a href="{{ url_for('activity_list') }}">Activity Log</a>
-      <a href="{{ url_for('monthly_dashboard') }}">Monthly</a>
-      <a href="{{ url_for('quarterly_dashboard') }}">Quarterly</a>
-      <a href="{{ url_for('quarterly_target') }}">Target vs Achievement</a>
-      <a href="{{ url_for('annual_dashboard') }}">Annual</a>
-      {% if current_user.role in ("admin", "manager", "director", "vp") %}
-        <a href="{{ url_for('targets') }}">Targets</a>
-      {% endif %}
-      {% if current_user.is_admin %}
-  <a href="{{ url_for('auth.manage_users') }}">Manage Users</a>
-{% endif %}
-{% if current_user.role in ("admin", "manager", "director", "vp") %}
-  <a href="{{ url_for('service_area_list') }}">Service Areas</a>
-{% endif %}
+    <div class="header-actions">
+      <div class="notif-wrap" style="position:relative;">
+        <button class="btn-icon" id="notifBellBtn" aria-label="Notifications">
+          <i class="fa-regular fa-bell"></i>
+          <span class="badge-dot" id="notifBadge" style="display:none;"></span>
+        </button>
+        <div id="notifDropdown" style="display:none; position:absolute; right:0; top:calc(100% + 8px); width:320px; max-height:360px; overflow-y:auto; background:#fff; border-radius:8px; box-shadow:0 10px 30px rgba(0,0,0,0.2); z-index:1000;">
+          <div id="notifList" style="padding:8px 0;"></div>
+          <div id="notifEmpty" style="padding:20px; text-align:center; color:#888; display:none;">No notifications yet.</div>
+        </div>
+      </div>
       {% set role_display = {"admin":"Admin","manager":"Manager","staff":"Staff","director":"Director","vp":"VP"} %}
-<a class="btn-highlight" href="{{ url_for('auth.logout') }}">Log Out ({{ current_user.full_name }} – {{ role_display.get(current_user.role, current_user.role) }})</a>
-    {% else %}
-      <a href="{{ url_for('auth.login') }}">Log In</a>
-      <a href="{{ url_for('auth.register') }}">Register</a>
+      <a class="btn-logout" href="{{ url_for('auth.logout') }}">
+        <i class="fa-regular fa-circle-user"></i>
+        Log Out <span class="user-name">({{ current_user.full_name }} – {{ role_display.get(current_user.role, current_user.role) }})</span>
+      </a>
+      <button class="hamburger" id="hamburgerBtn" aria-label="Toggle navigation" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
     {% endif %}
+  </div>
+
+  {% if current_user.is_authenticated %}
+  <nav class="app-nav" id="appNav">
+    <a href="{{ url_for('dashboard') }}" class="nav-link {{ 'active' if request.endpoint == 'dashboard' }}">
+      <i class="fa-solid fa-gauge-high"></i> Dashboard
+    </a>
+    <a href="{{ url_for('activity_list') }}" class="nav-link {{ 'active' if request.endpoint == 'activity_list' }}">
+      <i class="fa-solid fa-list-check"></i> Activity Log
+    </a>
+    <a href="{{ url_for('monthly_dashboard') }}" class="nav-link {{ 'active' if request.endpoint == 'monthly_dashboard' }}">
+      <i class="fa-solid fa-calendar-days"></i> Monthly
+    </a>
+    <a href="{{ url_for('quarterly_dashboard') }}" class="nav-link {{ 'active' if request.endpoint == 'quarterly_dashboard' }}">
+      <i class="fa-solid fa-calendar-week"></i> Quarterly
+    </a>
+    <a href="{{ url_for('quarterly_target') }}" class="nav-link {{ 'active' if request.endpoint == 'quarterly_target' }}">
+      <i class="fa-solid fa-bullseye"></i> Target vs Achievement
+    </a>
+    <a href="{{ url_for('annual_dashboard') }}" class="nav-link {{ 'active' if request.endpoint == 'annual_dashboard' }}">
+      <i class="fa-solid fa-calendar"></i> Annual
+    </a>
+    {% if current_user.role in ("admin", "manager", "director", "vp") %}
+    <a href="{{ url_for('targets') }}" class="nav-link {{ 'active' if request.endpoint == 'targets' }}">
+      <i class="fa-solid fa-flag-checkered"></i> Targets
+    </a>
+    {% endif %}
+    {% if current_user.is_admin %}
+    <a href="{{ url_for('auth.manage_users') }}" class="nav-link {{ 'active' if request.endpoint == 'auth.manage_users' }}">
+      <i class="fa-solid fa-users-gear"></i> Manage Users
+    </a>
+    {% endif %}
+    {% if current_user.role in ("admin", "manager", "director", "vp") %}
+<a href="{{ url_for('service_area_list') }}" class="nav-link {{ 'active' if request.endpoint == 'service_area_list' }}">
+  <i class="fa-solid fa-layer-group"></i> Service Areas
+</a>
+{% endif %}
+{% if current_user.role in ("admin", "vp", "director") %}
+<a href="{{ url_for('team_list') }}" class="nav-link {{ 'active' if request.endpoint == 'team_list' }}">
+  <i class="fa-solid fa-people-group"></i> Teams
+</a>
+{% endif %}
+</nav>
   </nav>
+  {% else %}
+  <nav class="app-nav">
+    <a href="{{ url_for('auth.login') }}" class="nav-link"><i class="fa-solid fa-right-to-bracket"></i> Log In</a>
+    <a href="{{ url_for('auth.register') }}" class="nav-link"><i class="fa-solid fa-user-plus"></i> Register</a>
+  </nav>
+  {% endif %}
 </header>
-</section>
 
-  <main class="container">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        {% for category, message in messages %}
-          <div class="flash flash-{{ category }}">{{ message }}</div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
+<main class="app-main">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
 
-    {% block content %}{% endblock %}
-  </main>
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="app-footer">
+  <p>&copy; 2026 Activity Tracker. Built for clear, reliable service-area reporting.</p>
+</footer>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const hamburger = document.getElementById('hamburgerBtn');
+  const nav = document.getElementById('appNav');
+  if (hamburger && nav) {
+    hamburger.addEventListener('click', () => {
+      const isOpen = nav.classList.toggle('open');
+      hamburger.classList.toggle('open', isOpen);
+      hamburger.setAttribute('aria-expanded', isOpen);
+    });
+  }
+});
+</script>
+
+{% if current_user.is_authenticated %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const bellBtn = document.getElementById('notifBellBtn');
+  const dropdown = document.getElementById('notifDropdown');
+  const badge = document.getElementById('notifBadge');
+  const list = document.getElementById('notifList');
+  const empty = document.getElementById('notifEmpty');
+
+  function refreshBadge() {
+    fetch('/notifications/unread_count')
+      .then(r => r.json())
+      .then(d => { badge.style.display = d.count > 0 ? 'block' : 'none'; })
+      .catch(() => {});
+  }
+
+  function loadList() {
+    fetch('/notifications')
+      .then(r => r.json())
+      .then(notes => {
+        list.innerHTML = '';
+        empty.style.display = notes.length ? 'none' : 'block';
+        notes.forEach(n => {
+          const item = document.createElement(n.link ? 'a' : 'div');
+          if (n.link) item.href = n.link;
+          item.style.cssText = 'display:block; padding:10px 16px; border-bottom:1px solid #f0f0f0; text-decoration:none; color:#333;' +
+            (n.is_read ? '' : 'background:#eef6ff; font-weight:600;');
+          item.innerHTML = '<div>' + n.message + '</div><div style="font-size:11px; color:#999; margin-top:4px;">' + n.created_at + '</div>';
+          list.appendChild(item);
+        });
+      })
+      .catch(() => {});
+  }
+
+  if (bellBtn) {
+    bellBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      const open = dropdown.style.display === 'block';
+      dropdown.style.display = open ? 'none' : 'block';
+      if (!open) {
+        loadList();
+        fetch('/notifications/mark_read', { method: 'POST' }).then(refreshBadge);
+      }
+    });
+
+    document.addEventListener('click', function(e) {
+      if (!dropdown.contains(e.target) && e.target !== bellBtn) {
+        dropdown.style.display = 'none';
+      }
+    });
+
+    refreshBadge();
+    setInterval(refreshBadge, 30000);
+  }
+});
+</script>
+{% endif %}
+
 </body>
 </html>

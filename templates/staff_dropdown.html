@@ -1,0 +1,42 @@
+{% if staff_groups.groups %}
+<div>
+  <label>Staff</label>
+  <select name="staff_id" onchange="this.form.submit()">
+    <option value="" {% if staff_id is none %}selected{% endif %}>-- Myself --</option>
+    <option value="0" {% if staff_id==0 %}selected{% endif %}>-- All My Staff (Combined) --</option>
+
+    {% if staff_groups.level == "director" %}
+      {% for dg in staff_groups.groups %}
+      <optgroup label="{{ dg.director.full_name }} (Director)">
+        <option value="{{ dg.director.id }}" {% if staff_id==dg.director.id %}selected{% endif %}>
+          {{ dg.director.full_name }} (Director — Whole Org)
+        </option>
+        {% for mg in dg.manager_groups %}
+        <option value="{{ mg.manager.id }}" {% if staff_id==mg.manager.id %}selected{% endif %}>
+          &nbsp;&nbsp;↳ {{ mg.team_name }} — {{ mg.manager.full_name }} (Manager)
+        </option>
+        {% for s in mg.staff %}
+        <option value="{{ s.id }}" {% if staff_id==s.id %}selected{% endif %}>
+          &nbsp;&nbsp;&nbsp;&nbsp;↳ {{ s.full_name }} ({{ s.role|capitalize }})
+        </option>
+        {% endfor %}
+        {% endfor %}
+      </optgroup>
+      {% endfor %}
+    {% else %}
+      {% for group in staff_groups.groups %}
+      <optgroup label="{{ group.team_name }}">
+        <option value="{{ group.manager.id }}" {% if staff_id==group.manager.id %}selected{% endif %}>
+          {{ group.manager.full_name }} (Manager — Team Total)
+        </option>
+        {% for s in group.staff %}
+        <option value="{{ s.id }}" {% if staff_id==s.id %}selected{% endif %}>
+          &nbsp;&nbsp;↳ {{ s.full_name }} ({{ s.role|capitalize }})
+        </option>
+        {% endfor %}
+      </optgroup>
+      {% endfor %}
+    {% endif %}
+  </select>
+</div>
+{% endif %}

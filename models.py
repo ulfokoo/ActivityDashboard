@@ -15,6 +15,8 @@ class User(UserMixin, db.Model):
     full_name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
+    team_id = db.Column(db.Integer, db.ForeignKey("teams.id"), nullable=True)
+    team = db.relationship("Team", backref="members")
 
     # "admin", "vp", "director", "manager", or "staff"
     role = db.Column(db.String(20), nullable=False, default="staff")
@@ -65,6 +67,34 @@ def get_all_subordinates(user):
         stack.extend(person.direct_reports)
     return result
 
+class Notification(db.Model):
+    __tablename__ = "notifications"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    user = db.relationship("User", backref="notifications")
+
+    message = db.Column(db.String(255), nullable=False)
+    link = db.Column(db.String(255), nullable=True)
+    is_read = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+def notify_users(user_ids, message, link=None):
+    seen = set()
+    for uid in user_ids:
+        if not uid or uid in seen:
+            continue
+        seen.add(uid)
+        db.session.add(Notification(user_id=uid, message=message, link=link))
+
+class Team(db.Model):
+    __tablename__ = "teams"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), unique=True, nullable=False)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+
 # ---------------------------------------------------------------------------
 # Role-based permission for Service Areas: each role can only rename/delete
 # areas created by their own role or a role below them, never above.
@@ -81,12 +111,17 @@ ASSIGNABLE_ROLE = {
 }
 
 def can_manage_service_area(user, area) -> bool:
-    """True if `user` is allowed to rename/delete `area`."""
+    """True if `user` is allowed to rename/delete/toggle `area`."""
     if user.role == "admin":
         return True
+    if user.role == "manager":
+        return area.created_by_id == user.id
+    # director/vp: can manage their own areas, or anything created by a
+    # lower-ranked role (i.e. any manager's area), since they see everything.
     creator_rank = ROLE_RANK.get(area.created_by_role, 0)
     user_rank = ROLE_RANK.get(user.role, 0)
-    return user_rank >= creator_rank
+    return area.created_by_id == user.id or user_rank > creator_rank
+
 # ---------------------------------------------------------------------------
 
 def calc_day(d: date) -> str:
@@ -191,7 +226,11 @@ class ServiceArea(db.Model):
     # used to control who's allowed to rename/delete it later.
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     created_by_role = db.Column(db.String(20), nullable=True)
-    creator = db.relationship("User")
+    creator = db.relationship("User", foreign_keys=[created_by_id])
+
+    assigned_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    assigned_by_role = db.Column(db.String(20), nullable=True)
+    assigner = db.relationship("User", foreign_keys=[assigned_by_id])
 
 
 class QuarterServiceArea(db.Model):
@@ -214,3 +253,38 @@ class QuarterServiceArea(db.Model):
             name="uq_quarter_service_area"
         ),
     )
+
+def get_wing_owner_id(user):
+    """
+    Returns the id of the manager who owns this user's Service Area 'wing'.
+    - A manager owns their own wing.
+    - Staff (or anyone below manager) walk up the manager_id chain until
+      they hit a manager, and inherit that manager's wing.
+    - Returns None if no manager is found in the chain (e.g. unassigned staff).
+    """
+    if user.role == "manager":
+        return user.id
+    node = user
+    seen = {user.id}
+    while node.manager_id:
+        node = User.query.get(node.manager_id)
+        if node is None or node.id in seen:
+            break
+        seen.add(node.id)
+        if node.role == "manager":
+            return node.id
+    return None
+
+
+def visible_service_area_owner_ids(user):
+    """
+    Returns the list of manager-ids (the 'wing owners') whose Service Areas
+    `user` is allowed to see, or None if `user` should see all Service Areas
+    (admin, vp, director — anyone above manager level).
+    - A manager only sees their own wing.
+    - Staff/anyone below manager sees the wing of the manager they report up to.
+    """
+    if user.role in ("admin", "vp", "director"):
+        return None
+    owner_id = get_wing_owner_id(user)
+    return [owner_id]

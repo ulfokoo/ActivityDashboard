@@ -33,18 +33,7 @@
       {% for s in service_areas %}<option value="{{ s }}" {% if filters.service_area==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
     </select>
   </div>
-  {% if visible_staff %}
-  <div>
-    <label>Staff</label>
-    <select name="staff_id">
-      <option value="" {% if staff_id is none %}selected{% endif %}>-- All My Staff (Total) --</option>
-      <option value="me" {% if staff_id=='me' %}selected{% endif %}>Myself Only</option>
-      {% for s in visible_staff %}
-      <option value="{{ s.id }}" {% if staff_id==s.id %}selected{% endif %}>{{ s.full_name }} ({{ s.role|capitalize }})</option>
-      {% endfor %}
-    </select>
-  </div>
-  {% endif %}
+  {% include "staff_selector.html" %}
   <div><button class="btn" type="submit">Filter</button></div>
   <div><a class="btn btn-secondary" href="{{ url_for('activity_list') }}">Reset</a></div>
 </form>

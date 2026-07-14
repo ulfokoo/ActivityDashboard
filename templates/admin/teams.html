@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Manage Teams{% endblock %}
+{% block content %}
+<h1>Manage Teams</h1>
+<p>Create teams and assign managers so their staff group under a real team name.</p>
+
+<form method="post" action="{{ url_for('team_add') }}" class="filters" style="margin-bottom:20px;">
+  <div>
+    <label>New Team Name</label>
+    <input type="text" name="name" placeholder="e.g. Business Development">
+  </div>
+  <div><button class="btn" type="submit">Create Team</button></div>
+</form>
+
+<h2 class="section-title">Assign Managers to Teams</h2>
+<table>
+  <thead>
+    <tr><th>Manager</th><th>Team</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for m in managers %}
+    <tr>
+      <td>{{ m.full_name }}</td>
+      <td colspan="2">
+        <form method="post" action="{{ url_for('team_assign') }}" style="display:flex; gap:8px; align-items:center;">
+          <input type="hidden" name="manager_id" value="{{ m.id }}">
+          <select name="team_id">
+            <option value="">-- No Team --</option>
+            {% for t in teams %}
+            <option value="{{ t.id }}" {% if m.team_id==t.id %}selected{% endif %}>{{ t.name }}</option>
+            {% endfor %}
+          </select>
+          <button class="btn btn-secondary" type="submit">Save</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -5,14 +5,24 @@
 <h1>Manage Service Areas</h1>
 <p style="color: #52606d;">Add, rename, activate/deactivate, or delete the Service Area categories used across the app.</p>
 
-<form method="POST" action="{{ url_for('service_area_add') }}" style="margin-bottom: 20px;">
+<form method="POST" action="{{ url_for('service_area_add') }}" style="margin-bottom: 20px; display: flex; gap: 8px; align-items: center;">
     <input type="text" name="name" placeholder="New service area name" required>
+
+    {% if current_user.role in ("admin", "vp", "director") %}
+    <select name="manager_id">
+        <option value="">-- Assign to myself ({{ current_user.full_name }}) --</option>
+        {% for m in managers %}
+        <option value="{{ m.id }}">{{ m.full_name }}</option>
+        {% endfor %}
+    </select>
+    {% endif %}
+
     <button type="submit">Add</button>
 </form>
 
 <table style="margin-bottom: 20px;">
     <thead>
-        <tr><th>Name</th><th>Status</th><th>Actions</th></tr>
+        <tr><th>Name</th><th>Belongs To</th><th>Status</th><th>Actions</th></tr>
     </thead>
     <tbody>
         {% for area in areas %}
@@ -23,6 +33,7 @@
                     <button type="submit">Rename</button>
                 </form>
             </td>
+            <td>{{ area.creator.full_name if area.creator else "—" }}</td>
             <td>{{ "Active" if area.is_active else "Inactive" }}</td>
             <td style="display: flex; gap: 8px;">
                 <form method="POST" action="{{ url_for('service_area_toggle', area_id=area.id) }}">

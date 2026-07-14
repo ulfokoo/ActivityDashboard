@@ -3,15 +3,17 @@ import secrets
 import uuid
 from werkzeug.utils import secure_filename
 from datetime import date, datetime
-from flask import Flask, app, render_template, redirect, url_for, request, flash, abort, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort, send_from_directory
 from flask_login import LoginManager, login_required, current_user
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 import config
 from models import (
-    db, Activity, Target, User, ServiceArea, QuarterServiceArea,
+    db, Activity, Target, User, ServiceArea, QuarterServiceArea, Team,
     calc_quarter, calc_fiscal_year, get_all_subordinates,
-    ASSIGNABLE_ROLE, can_manage_service_area,
+    ASSIGNABLE_ROLE, ROLE_RANK, can_manage_service_area,
+    get_wing_owner_id, visible_service_area_owner_ids,
+    Notification, notify_users,
 )
 from forms import ActivityForm, TargetForm
 from auth import auth_bp, admin_required
@@ -46,6 +48,7 @@ def create_app():
         db.create_all()
         _ensure_user_columns()
         _ensure_service_area_columns()
+        _ensure_team_support()
         _ensure_activity_columns()
         _seed_if_empty()
         _seed_default_admin()
@@ -97,6 +100,8 @@ def _ensure_service_area_columns():
     columns_to_add = {
         "created_by_id": "INTEGER REFERENCES users(id)",
         "created_by_role": "VARCHAR(30)",
+        "assigned_by_id": "INTEGER REFERENCES users(id)",
+        "assigned_by_role": "VARCHAR(20)",
     }
 
     with db.engine.connect() as conn:
@@ -109,6 +114,17 @@ def _ensure_service_area_columns():
                 except Exception as e:
                     print(f"Column migration skipped/failed: {e}")
         conn.commit()
+ 
+
+def _ensure_team_support():
+    """
+    Creates the `teams` table if it doesn't exist yet, and adds the
+    `team_id` column to `users` if the live database is still missing it.
+    """
+    from sqlalchemy import text, inspect
+    ...     
+
+       
 def _ensure_activity_columns():
     from sqlalchemy import text, inspect
 
@@ -252,23 +268,44 @@ def _seed_if_empty():
 
     db.session.commit()
 
-def _quarter_service_areas(year, quarter):
+def _quarter_service_areas(year, quarter, for_user=None):
     """
-    Return the list of service-area names active for one specific year+quarter.
-    The first time a quarter is viewed, seed it from whatever is currently
-    active in the master Service Areas list, so nothing breaks for quarters
-    you've already been using.
+    ...(existing docstring, unchanged)...
     """
+    scope_user = for_user or current_user
+
     existing = QuarterServiceArea.query.filter_by(year=year, quarter=quarter).all()
     if not existing:
-        active_areas = ServiceArea.query.filter_by(is_active=True) \
-            .order_by(ServiceArea.sort_order, ServiceArea.name).all()
+        active_areas = [a.name for a in _scoped_service_areas_query(scope_user).all()]
         for a in active_areas:
-            db.session.add(QuarterServiceArea(year=year, quarter=quarter, service_area=a.name))
+            db.session.add(QuarterServiceArea(year=year, quarter=quarter, service_area=a))
         db.session.commit()
         existing = QuarterServiceArea.query.filter_by(year=year, quarter=quarter).all()
-    return [q.service_area for q in existing]
 
+    visible_names = {a.name for a in _scoped_service_areas_query(scope_user).all()}
+    return [q.service_area for q in existing if q.service_area in visible_names]
+
+
+def _scoped_service_areas_query(user, only_active=True):
+    """ServiceArea query scoped by role:
+       - admin: sees everything
+       - director/vp: sees only areas THEY personally assigned (isolated from peer directors/VPs)
+       - manager: sees only areas that belong to them
+    """
+    q = ServiceArea.query
+    if only_active:
+        q = q.filter_by(is_active=True)
+
+    if user.role == "admin":
+        pass  # unrestricted
+    elif user.role in ("director", "vp"):
+        q = q.filter(ServiceArea.assigned_by_id == user.id)
+    elif user.role == "manager":
+        q = q.filter(ServiceArea.created_by_id == user.id)
+    else:
+        q = q.filter(db.false())
+
+    return q.order_by(ServiceArea.sort_order, ServiceArea.name)
 
 def _propagate_new_service_area_to_quarters(area_name):
     """
@@ -290,7 +327,40 @@ def _propagate_new_service_area_to_quarters(area_name):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+def _apply_form(a, form):
+    """Copy ActivityForm fields onto an Activity instance (except date/document/submit)."""
+    a.service_area = form.service_area.data
+    a.specific_activity = form.specific_activity.data
+    a.description = form.description.data
+    a.where_location = form.where_location.data
+    a.whom = form.whom.data
+    a.engagement_type = form.engagement_type.data
+    a.result_outcome = form.result_outcome.data
+    a.financial_result = form.financial_result.data
+    a.future_plan = form.future_plan.data
+    a.status = form.status.data
+    a.responsible_org = form.responsible_org.data
+    a.remarks = form.remarks.data
+
+
+def _save_uploaded_document(file_storage):
+    """Save an uploaded FileField's file to disk. Returns (saved_name, original_name) or (None, None)."""
+    if not file_storage or not getattr(file_storage, "filename", ""):
+        return None, None
+
+    original_name = secure_filename(file_storage.filename)
+    ext = os.path.splitext(original_name)[1]
+    saved_name = f"{uuid.uuid4().hex}{ext}"
+
+    upload_folder = getattr(config, "UPLOAD_FOLDER", os.path.join(os.getcwd(), "uploads"))
+    os.makedirs(upload_folder, exist_ok=True)
+    file_storage.save(os.path.join(upload_folder, saved_name))
+
+    return saved_name, original_name
+
+
 def register_routes(app: Flask):
+
 
     @app.route("/")
     def home():
@@ -300,26 +370,7 @@ def register_routes(app: Flask):
     @login_required
     def dashboard():
         staff_id = request.args.get("staff_id", type=int)
-
-        # Who can this user see, if anyone?
-        if current_user.role == "admin":
-            staff_list = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
-        elif current_user.role in ("manager", "director", "vp"):
-            staff_list = get_all_subordinates(current_user)
-        else:
-            staff_list = []
-        visible_ids = {u.id for u in staff_list}
-
-        # Decide whose data to show — default is always the logged-in user's own.
-        selected_staff = None
-        if staff_id == 0:
-            # explicit "All My Staff (Total)" choice
-            filter_ids = list(visible_ids) if visible_ids else [current_user.id]
-        elif staff_id and staff_id in visible_ids:
-            selected_staff = User.query.get(staff_id)
-            filter_ids = [staff_id]
-        else:
-            filter_ids = [current_user.id]   # default: their own dashboard
+        filter_ids, selected_staff, staff_groups = _resolve_view_scope(current_user, staff_id)
 
         base = Activity.query.filter(Activity.user_id.in_(filter_ids))
         total = base.count()
@@ -335,8 +386,9 @@ def register_routes(app: Flask):
             "dashboard.html",
             total=total, completed=completed, ongoing=ongoing, delayed=delayed, total_etb=total_etb,
             recent=recent,
-            staff_list=staff_list, selected_staff=selected_staff,
+            staff_groups=staff_groups, selected_staff=selected_staff,
         )
+   
     @app.route("/activities")
     @login_required
     def activity_list():
@@ -345,37 +397,22 @@ def register_routes(app: Flask):
         status = request.args.get("status")
         service_area = request.args.get("service_area")
 
-        # staff_id can be a numeric id, the literal "me", or absent/blank
-        # ("All My Staff (Total)" — the historical default for this page).
         staff_id_param = request.args.get("staff_id", "")
         if staff_id_param == "me":
             staff_id = "me"
+        elif staff_id_param == "0":
+            staff_id = 0
         elif staff_id_param.isdigit():
             staff_id = int(staff_id_param)
         else:
             staff_id = None
 
-        if current_user.role == "admin":
-            visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
-        elif current_user.role in ("manager", "director", "vp"):
-            visible_staff = get_all_subordinates(current_user)
-        else:
-            visible_staff = []
-        visible_ids = {u.id for u in visible_staff}
-
         if staff_id == "me":
             filter_ids = [current_user.id]
-        elif staff_id and staff_id in visible_ids:
-            filter_ids = [staff_id]
-        elif current_user.role == "admin":
-            filter_ids = None
-        elif current_user.role in ("manager", "director", "vp"):
-            # Include the manager's/director's/VP's own activities too, not
-            # just their subordinates', so their own entries don't disappear
-            # from their own Activity Log.
-            filter_ids = list(visible_ids | {current_user.id})
+            selected_staff = None
+            staff_groups = _staff_view_options(current_user)
         else:
-            filter_ids = [current_user.id]
+            filter_ids, selected_staff, staff_groups = _resolve_view_scope(current_user, staff_id)
 
         q = Activity.query
         if filter_ids is not None:
@@ -393,10 +430,11 @@ def register_routes(app: Flask):
         years = [r[0] for r in db.session.query(Activity.year).distinct().order_by(Activity.year.desc())]
 
         return render_template("activities/activity_list.html", activities=activities,
-                                years=years, months=config.MONTHS, statuses=config.STATUSES,
-                                service_areas=config.SERVICE_AREAS,
-                                filters=dict(year=year, month=month, status=status, service_area=service_area),
-                                visible_staff=visible_staff, staff_id=staff_id)
+                        years=years, months=config.MONTHS, statuses=config.STATUSES,
+                        service_areas=config.SERVICE_AREAS,
+                        filters=dict(year=year, month=month, status=status, service_area=service_area),
+                        staff_groups=staff_groups, staff_id=staff_id,
+                        selected_staff=selected_staff)
 
     @app.route("/activities/add", methods=["GET", "POST"])
     @login_required
@@ -437,20 +475,123 @@ def register_routes(app: Flask):
             flash("Activity updated.", "success")
             return redirect(url_for("activity_list"))
         return render_template("activities/activity_form.html", form=form, title="Edit Activity", activity=a)
+    def _user_brief(u):
+        return {"id": u.id, "full_name": u.full_name, "role": u.role}
+
+    def _build_manager_groups(managers):
+        groups = []
+        for m in managers:
+            staff = User.query.filter_by(manager_id=m.id, is_approved=True).order_by(User.full_name).all()
+            team_name = m.team.name if m.team else f"{m.full_name}'s Team"
+            groups.append({
+                "manager": _user_brief(m),
+                "staff": [_user_brief(s) for s in staff],
+                "team_name": team_name
+            })
+        return groups
+
+    def _build_director_groups(directors):
+        groups = []
+        for d in directors:
+            managers = User.query.filter_by(manager_id=d.id, role="manager", is_approved=True).order_by(User.full_name).all()
+            groups.append({
+                "director": _user_brief(d),
+                "manager_groups": _build_manager_groups(managers)
+            })
+        return groups
+    
+    def _staff_view_options(user):
+        """
+        Builds the hierarchy visible to `user` for the 'View Staff' selector.
+        Returns {"level": "director"|"manager", "groups": [...]}
+        - admin / anyone ranked above director: level="director" -> Directors -> Managers -> Staff
+        - director: level="manager" -> their Managers -> Staff
+        - manager: level="manager" -> just themselves -> Staff
+        - staff: level="manager" -> empty
+        """
+        user_rank = ROLE_RANK.get(user.role, 0)
+        director_rank = ROLE_RANK.get("director", 2)
+
+        if user.role == "admin":
+            directors = User.query.filter_by(role="director", is_approved=True).order_by(User.full_name).all()
+            return {"level": "director", "groups": _build_director_groups(directors)}
+        elif user_rank > director_rank:
+            subs = get_all_subordinates(user)
+            directors = [u for u in subs if u.role == "director"]
+            return {"level": "director", "groups": _build_director_groups(directors)}
+        elif user.role == "director":
+            subs = get_all_subordinates(user)
+            managers = [u for u in subs if u.role == "manager"]
+            return {"level": "manager", "groups": _build_manager_groups(managers)}
+        elif user.role == "manager":
+            return {"level": "manager", "groups": _build_manager_groups([user])}
+        else:
+            return {"level": "manager", "groups": []}
+
+    def _resolve_view_scope(current_user, staff_id):
+        """
+        Turns a staff_id from the dropdown into (filter_ids, selected_staff,
+        view). `view` is the dict from _staff_view_options — pass it straight
+        into the template. Selecting a director rolls up that director's
+        entire org (all their managers + all staff); selecting a manager
+        rolls up just their team; selecting a staff member drills to just
+        that person.
+        """
+        view = _staff_view_options(current_user)
+
+        # Flatten everything visible into id -> rollup-ids maps.
+        director_rollups = {}   # director_id -> [director_id, manager_ids..., staff_ids...]
+        manager_rollups = {}    # manager_id -> [manager_id, staff_ids...]
+        all_visible_ids = set()
+
+        if view["level"] == "director":
+            for dg in view["groups"]:
+                d_id = dg["director"]["id"]
+                org_ids = [d_id]
+                for mg in dg["manager_groups"]:
+                    m_ids = [mg["manager"]["id"]] + [s["id"] for s in mg["staff"]]
+                    manager_rollups[mg["manager"]["id"]] = m_ids
+                    org_ids += m_ids
+                director_rollups[d_id] = org_ids
+                all_visible_ids.update(org_ids)
+        else:
+            for mg in view["groups"]:
+                m_ids = [mg["manager"]["id"]] + [s["id"] for s in mg["staff"]]
+                manager_rollups[mg["manager"]["id"]] = m_ids
+                all_visible_ids.update(m_ids)
+
+
+        selected_staff = None
+        if staff_id == 0:
+            filter_ids = list(all_visible_ids) if all_visible_ids else [current_user.id]
+        elif staff_id and staff_id in director_rollups:
+            filter_ids = director_rollups[staff_id]
+            selected_staff = User.query.get(staff_id)
+        elif staff_id and staff_id in manager_rollups:
+            filter_ids = manager_rollups[staff_id]
+            selected_staff = User.query.get(staff_id)
+        elif staff_id and staff_id in all_visible_ids:
+            filter_ids = [staff_id]
+            selected_staff = User.query.get(staff_id)
+        else:
+            filter_ids = [current_user.id]
+
+        return filter_ids, selected_staff, view
+       
     
     @app.route("/activities/<int:activity_id>/document")
     @login_required
     def activity_document(activity_id):
-        if current_user.role not in ("manager", "director", "vp", "admin"):
-            abort(403)
-        a = Activity.query.get_or_404(activity_id)
-        if not a.document_filename:
-            abort(404)
-        return send_from_directory(
-            app.config["UPLOAD_FOLDER"],
-            a.document_filename,
-            as_attachment=True,
-            download_name=a.document_original_name or a.document_filename,
+            if current_user.role not in ("manager", "director", "vp", "admin"):
+                abort(403)
+            a = Activity.query.get_or_404(activity_id)
+            if not a.document_filename:
+                abort(404)
+            return send_from_directory(
+                app.config["UPLOAD_FOLDER"],
+                a.document_filename,
+                as_attachment=True,
+                download_name=a.document_original_name or a.document_filename,
         )
     
     @app.route("/activities/<int:activity_id>/delete", methods=["POST"])
@@ -499,20 +640,7 @@ def register_routes(app: Flask):
         month = request.args.get("month", default=config.MONTHS[datetime.now().month - 1])
         staff_id = request.args.get("staff_id", type=int)
 
-        if current_user.role == "admin":
-            visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
-        elif current_user.role in ("manager", "director", "vp"):
-            visible_staff = get_all_subordinates(current_user)
-        else:
-            visible_staff = []
-        visible_ids = {u.id for u in visible_staff}
-
-        if staff_id == 0:
-            filter_ids = list(visible_ids) if visible_ids else [current_user.id]
-        elif staff_id and staff_id in visible_ids:
-            filter_ids = [staff_id]
-        else:
-            filter_ids = [current_user.id]
+        filter_ids, selected_staff, staff_groups = _resolve_view_scope(current_user, staff_id)
 
         base = Activity.query.filter(
             Activity.year == year, Activity.month == month, Activity.user_id.in_(filter_ids)
@@ -526,8 +654,8 @@ def register_routes(app: Flask):
                 .filter(Activity.year == year, Activity.month == month, Activity.user_id.in_(filter_ids)).scalar(),
         )
 
-        active_areas = [a.name for a in ServiceArea.query.filter_by(is_active=True)
-                         .order_by(ServiceArea.sort_order, ServiceArea.name).all()]
+        active_areas = [a.name for a in _scoped_service_areas_query(current_user)
+                        .order_by(ServiceArea.sort_order, ServiceArea.name).all()]
 
         breakdown = []
         for sa in active_areas:
@@ -545,7 +673,8 @@ def register_routes(app: Flask):
 
         return render_template("monthly.html", year=year, month=month, summary=summary,
                                 breakdown=breakdown, years=config.YEARS, months=config.MONTHS,
-                                visible_staff=visible_staff, staff_id=staff_id)
+                                staff_groups=staff_groups, selected_staff=selected_staff, staff_id=staff_id)
+
 
     # ------------------------------------------------------------------
     # Quarterly Dashboard  (mirrors "Quarterly Dashboard" sheet)
@@ -557,20 +686,7 @@ def register_routes(app: Flask):
         quarter = request.args.get("quarter", default=calc_quarter(date.today()))
         staff_id = request.args.get("staff_id", type=int)
 
-        if current_user.role == "admin":
-            visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
-        elif current_user.role in ("manager", "director", "vp"):
-            visible_staff = get_all_subordinates(current_user)
-        else:
-            visible_staff = []
-        visible_ids = {u.id for u in visible_staff}
-
-        if staff_id == 0:
-            filter_ids = list(visible_ids) if visible_ids else [current_user.id]
-        elif staff_id and staff_id in visible_ids:
-            filter_ids = [staff_id]
-        else:
-            filter_ids = [current_user.id]
+        filter_ids, selected_staff, staff_groups = _resolve_view_scope(current_user, staff_id)
 
         base = Activity.query.filter(
             Activity.fiscal_year == year, Activity.quarter == quarter, Activity.user_id.in_(filter_ids)
@@ -585,8 +701,7 @@ def register_routes(app: Flask):
                         Activity.user_id.in_(filter_ids)).scalar(),
         )
 
-        active_areas = [a.name for a in ServiceArea.query.filter_by(is_active=True)
-                         .order_by(ServiceArea.sort_order, ServiceArea.name).all()]
+        active_areas = [a.name for a in _scoped_service_areas_query(current_user).all()]
 
         breakdown = []
         for sa in active_areas:
@@ -604,7 +719,7 @@ def register_routes(app: Flask):
 
         return render_template("quarterly.html", year=year, quarter=quarter, summary=summary,
                                 breakdown=breakdown, years=config.YEARS, quarters=config.QUARTERS,
-                                visible_staff=visible_staff, staff_id=staff_id)
+                                staff_groups=staff_groups, selected_staff=selected_staff, staff_id=staff_id)
 
    # ------------------------------------------------------------------
     # Quarterly Target vs Achievement (mirrors that sheet + "Targets" sheet)
@@ -613,29 +728,11 @@ def register_routes(app: Flask):
     @app.route("/quarterly-target")
     @login_required
     def quarterly_target():
-        from flask_login import current_user
-        from datetime import date
-        from flask import request, render_template
-        from sqlalchemy import func
-
         year = request.args.get("year", type=int, default=calc_fiscal_year(date.today()))
         quarter = request.args.get("quarter", default=calc_quarter(date.today()))
         staff_id = request.args.get("staff_id", type=int)
 
-        if current_user.role == "admin":
-            visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
-        elif current_user.role in ("manager", "director", "vp"):
-            visible_staff = get_all_subordinates(current_user)
-        else:
-            visible_staff = []
-        visible_ids = {u.id for u in visible_staff}
-
-        if staff_id == 0:
-            filter_ids = list(visible_ids) if visible_ids else [current_user.id]
-        elif staff_id and staff_id in visible_ids:
-            filter_ids = [staff_id]
-        else:
-            filter_ids = [current_user.id]
+        filter_ids, selected_staff, staff_groups = _resolve_view_scope(current_user, staff_id)
 
         rows = []
         total_target_count = 0
@@ -643,47 +740,28 @@ def register_routes(app: Flask):
         total_target_etb = 0
         total_actual_etb = 0
 
-        active_areas = [a.name for a in ServiceArea.query.filter_by(is_active=True)
-                         .order_by(ServiceArea.sort_order, ServiceArea.name).all()]
+        active_areas = [a.name for a in _scoped_service_areas_query(current_user).all()]
 
         for sa in active_areas:
-
-            # TARGETS
-            target_count = db.session.query(
-                func.coalesce(func.sum(Target.target_count), 0)
-            ).filter(
-                Target.year == year,
-                Target.quarter == quarter,
-                Target.service_area == sa,
+            target_count = db.session.query(func.coalesce(func.sum(Target.target_count), 0)).filter(
+                Target.year == year, Target.quarter == quarter, Target.service_area == sa,
                 Target.user_id.in_(filter_ids)
             ).scalar()
 
-            target_etb = db.session.query(
-                func.coalesce(func.sum(Target.target_etb), 0)
-            ).filter(
-                Target.year == year,
-                Target.quarter == quarter,
-                Target.service_area == sa,
+            target_etb = db.session.query(func.coalesce(func.sum(Target.target_etb), 0)).filter(
+                Target.year == year, Target.quarter == quarter, Target.service_area == sa,
                 Target.user_id.in_(filter_ids)
             ).scalar()
 
-            # ACTUALS
             actual_q = Activity.query.filter(
-                Activity.fiscal_year == year,
-                Activity.quarter == quarter,
-                Activity.service_area == sa,
-                Activity.user_id.in_(filter_ids)
+                Activity.fiscal_year == year, Activity.quarter == quarter,
+                Activity.service_area == sa, Activity.user_id.in_(filter_ids)
             )
-
             actual_count = actual_q.count()
 
-            actual_etb = db.session.query(
-                func.coalesce(func.sum(Activity.financial_result), 0)
-            ).filter(
-                Activity.fiscal_year == year,
-                Activity.quarter == quarter,
-                Activity.service_area == sa,
-                Activity.user_id.in_(filter_ids)
+            actual_etb = db.session.query(func.coalesce(func.sum(Activity.financial_result), 0)).filter(
+                Activity.fiscal_year == year, Activity.quarter == quarter,
+                Activity.service_area == sa, Activity.user_id.in_(filter_ids)
             ).scalar()
 
             rows.append({
@@ -712,15 +790,11 @@ def register_routes(app: Flask):
 
         return render_template(
             "quarterly_target.html",
-            year=year,
-            quarter=quarter,
-            rows=rows,
-            totals=totals,
-            years=config.YEARS,
-            quarters=config.QUARTERS,
-            visible_staff=visible_staff,
-            staff_id=staff_id,
+            year=year, quarter=quarter, rows=rows, totals=totals,
+            years=config.YEARS, quarters=config.QUARTERS,
+            staff_groups=staff_groups, selected_staff=selected_staff, staff_id=staff_id,
         )
+
     # ------------------------------------------------------------------
     # Targets — data entry screen (mirrors "Targets" sheet)
     # ------------------------------------------------------------------
@@ -866,10 +940,17 @@ def register_routes(app: Flask):
         else:
             filter_ids = [staff_id]
 
+        # Scope service areas to the selected manager/staff member, not just
+        # the logged-in director — so picking a manager shows their branch.
+        if staff_id and staff_id != 0 and staff_id in visible_ids:
+            scope_user = User.query.get(staff_id)
+        else:
+            scope_user = current_user
+
         quarter_rows = {}
         remaining_areas = {}
         for quarter in config.QUARTERS:
-            areas = _quarter_service_areas(year, quarter)
+            areas = _quarter_service_areas(year, quarter, for_user=scope_user)
             q = Target.query.filter(
                 Target.year == year, Target.quarter == quarter, Target.user_id.in_(filter_ids)
             )
@@ -887,6 +968,35 @@ def register_routes(app: Flask):
             staff_id=staff_id,
             can_add=(staff_id != 0),
         )
+   
+    @app.route("/notifications")
+    @login_required
+    def notifications_list():
+        notes = Notification.query.filter_by(user_id=current_user.id) \
+            .order_by(Notification.created_at.desc()).limit(20).all()
+        return jsonify([{
+            "id": n.id,
+            "message": n.message,
+            "link": n.link,
+            "is_read": n.is_read,
+            "created_at": n.created_at.strftime("%d %b %Y %H:%M")
+        } for n in notes])
+
+
+    @app.route("/notifications/unread_count")
+    @login_required
+    def notifications_unread_count():
+        count = Notification.query.filter_by(user_id=current_user.id, is_read=False).count()
+        return jsonify({"count": count})
+
+
+    @app.route("/notifications/mark_read", methods=["POST"])
+    @login_required
+    def notifications_mark_read():
+        Notification.query.filter_by(user_id=current_user.id, is_read=False) \
+            .update({"is_read": True})
+        db.session.commit()
+        return jsonify({"ok": True})
 
     # ------------------------------------------------------------------
     # Annual Dashboard (mirrors "Annual Dashboard" sheet)
@@ -897,20 +1007,7 @@ def register_routes(app: Flask):
         year = request.args.get("year", type=int, default=calc_fiscal_year(date.today()))
         staff_id = request.args.get("staff_id", type=int)
 
-        if current_user.role == "admin":
-            visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
-        elif current_user.role in ("manager", "director", "vp"):
-            visible_staff = get_all_subordinates(current_user)
-        else:
-            visible_staff = []
-        visible_ids = {u.id for u in visible_staff}
-
-        if staff_id == 0:
-            filter_ids = list(visible_ids) if visible_ids else [current_user.id]
-        elif staff_id and staff_id in visible_ids:
-            filter_ids = [staff_id]
-        else:
-            filter_ids = [current_user.id]
+        filter_ids, selected_staff, staff_groups = _resolve_view_scope(current_user, staff_id)
 
         base = Activity.query.filter(Activity.fiscal_year == year, Activity.user_id.in_(filter_ids))
         summary = dict(
@@ -922,8 +1019,7 @@ def register_routes(app: Flask):
                 .filter(Activity.fiscal_year == year, Activity.user_id.in_(filter_ids)).scalar(),
         )
 
-        active_areas = [a.name for a in ServiceArea.query.filter_by(is_active=True)
-                         .order_by(ServiceArea.sort_order, ServiceArea.name).all()]
+        active_areas = [a.name for a in _scoped_service_areas_query(current_user).all()]
 
         matrix = []
         for sa in active_areas:
@@ -937,44 +1033,60 @@ def register_routes(app: Flask):
 
         return render_template("annual.html", year=year, summary=summary, matrix=matrix,
                                 fiscal_months=config.FISCAL_MONTHS, years=config.YEARS,
-                                visible_staff=visible_staff, staff_id=staff_id)
+                                staff_groups=staff_groups, selected_staff=selected_staff, staff_id=staff_id)
 
     # ------------------------------------------------------------------
     # Manage Service Areas — Admin / Manager / Director / VP
     # ------------------------------------------------------------------
 
-    @app.route("/admin/service-areas")
+    @app.route("/admin/teams")
     @login_required
-    def service_area_list():
-        if current_user.role not in ("admin", "manager", "director", "vp"):
+    def team_list():
+        if current_user.role not in ("admin", "vp", "director"):
             flash("That page is restricted.", "info")
             return redirect(url_for("dashboard"))
-        areas = ServiceArea.query.order_by(ServiceArea.sort_order, ServiceArea.name).all()
-        return render_template("admin/service_areas.html", areas=areas)
 
-    @app.route("/admin/service-areas/add", methods=["POST"])
+        teams = Team.query.order_by(Team.name).all()
+        managers = User.query.filter_by(role="manager", is_approved=True).order_by(User.full_name).all()
+        return render_template("admin/teams.html", teams=teams, managers=managers)
+
+    @app.route("/admin/teams/add", methods=["POST"])
     @login_required
-    def service_area_add():
-        if current_user.role not in ("admin", "manager", "director", "vp"):
-            flash("Not authorized to add service areas.", "danger")
-            return redirect(url_for("service_area_list"))
+    def team_add():
+        if current_user.role not in ("admin", "vp", "director"):
+            flash("Not authorized.", "danger")
+            return redirect(url_for("team_list"))
 
         name = (request.form.get("name") or "").strip()
         if not name:
-            flash("Name is required.", "danger")
-        elif ServiceArea.query.filter_by(name=name).first():
-            flash("That service area already exists.", "danger")
+            flash("Team name is required.", "danger")
+        elif Team.query.filter_by(name=name).first():
+            flash("That team already exists.", "danger")
         else:
-            max_order = db.session.query(func.coalesce(func.max(ServiceArea.sort_order), 0)).scalar()
-            db.session.add(ServiceArea(
-                name=name, is_active=True, sort_order=max_order + 1,
-                created_by_id=current_user.id, created_by_role=current_user.role,
-            ))
+            db.session.add(Team(name=name, is_active=True))
             db.session.commit()
-            # Make it show up in every quarter's Targets dropdown right away
-            _propagate_new_service_area_to_quarters(name)
-            flash("Service area added.", "success")
-        return redirect(url_for("service_area_list"))
+            flash(f"Team '{name}' created.", "success")
+        return redirect(url_for("team_list"))
+
+    @app.route("/admin/teams/assign", methods=["POST"])
+    @login_required
+    def team_assign():
+        if current_user.role not in ("admin", "vp", "director"):
+            flash("Not authorized.", "danger")
+            return redirect(url_for("team_list"))
+
+        manager_id = request.form.get("manager_id", type=int)
+        team_id = request.form.get("team_id", type=int)
+        manager = User.query.filter_by(id=manager_id, role="manager").first()
+        if not manager:
+            flash("Manager not found.", "danger")
+            return redirect(url_for("team_list"))
+
+        manager.team_id = team_id if team_id else None
+        db.session.commit()
+        flash(f"{manager.full_name} updated.", "success")
+        return redirect(url_for("team_list"))
+    
 
     @app.route("/admin/service-areas/<int:area_id>/rename", methods=["POST"])
     @login_required
@@ -1012,6 +1124,21 @@ def register_routes(app: Flask):
         db.session.commit()
         flash(f"'{area.name}' is now {'active' if area.is_active else 'inactive'}.", "info")
         return redirect(url_for("service_area_list"))
+    
+
+
+    @app.route("/admin/service-areas")
+    @login_required
+    def service_area_list():
+        if current_user.role not in ("admin", "manager", "director", "vp"):
+            flash("That page is restricted.", "info")
+            return redirect(url_for("dashboard"))
+
+        areas = _scoped_service_areas_query(current_user, only_active=False).all()
+        managers = []
+        if current_user.role in ("admin", "vp", "director"):
+            managers = User.query.filter_by(role="manager").order_by(User.full_name).all()
+        return render_template("admin/service_areas.html", areas=areas, managers=managers)
 
     @app.route("/admin/service-areas/<int:area_id>/delete", methods=["POST"])
     @login_required
