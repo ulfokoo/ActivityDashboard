@@ -77,6 +77,7 @@ def _ensure_user_columns():
         "id_no": "VARCHAR(50)",
         "segment": "VARCHAR(120)",
         "manager_id": "INTEGER REFERENCES users(id)",
+        "team_id": "INTEGER REFERENCES teams(id)"
     }
 
     with db.engine.connect() as conn:
