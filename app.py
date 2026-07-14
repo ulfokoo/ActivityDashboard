@@ -132,6 +132,10 @@ def _ensure_activity_columns():
     columns_to_add = {
         "document_filename": "VARCHAR(255)",
         "document_original_name": "VARCHAR(255)",
+        "approval_status": "VARCHAR(20) DEFAULT 'none'",
+        "approved_by_id": "INTEGER REFERENCES users(id)",
+        "approved_at": "TIMESTAMP",
+        "approval_note": "VARCHAR(255)",
     }
 
     with db.engine.connect() as conn:
@@ -455,6 +459,26 @@ def register_routes(app: Flask):
             flash("Activity added.", "success")
             return redirect(url_for("activity_list"))
         return render_template("activities/activity_form.html", form=form, title="Add Activity")
+    
+    @app.route("/activities/<int:activity_id>/approve", methods=["POST"])
+    @login_required
+    def activity_approve(activity_id):
+        activity = Activity.query.get_or_404(activity_id)
+        decision = request.form.get("decision")
+        note = request.form.get("note", "")
+
+        if decision == "approve":
+            activity.approval_status = "approved"
+            activity.approval_note = None
+        elif decision == "reject":
+            activity.approval_status = "rejected"
+            activity.approval_note = note
+
+        db.session.commit()
+        return redirect(url_for("activity_list"))
+    
+    
+
 
     @app.route("/activities/<int:activity_id>/edit", methods=["GET", "POST"])
     @login_required
@@ -476,6 +500,7 @@ def register_routes(app: Flask):
             flash("Activity updated.", "success")
             return redirect(url_for("activity_list"))
         return render_template("activities/activity_form.html", form=form, title="Edit Activity", activity=a)
+   
     def _user_brief(u):
         return {"id": u.id, "full_name": u.full_name, "role": u.role}
 
@@ -702,10 +727,15 @@ def register_routes(app: Flask):
                         Activity.user_id.in_(filter_ids)).scalar(),
         )
 
-        active_areas = [a.name for a in _scoped_service_areas_query(current_user).all()]
+        breakdown_counts = (
+            base.with_entities(Activity.service_area, func.count(Activity.id))
+            .group_by(Activity.service_area)
+            .all()
+        )
+        areas_with_activity = [row[0] for row in breakdown_counts if row[0]]
 
         breakdown = []
-        for sa in active_areas:
+        for sa in areas_with_activity:
             rows = base.filter(Activity.service_area == sa)
             breakdown.append(dict(
                 service_area=sa,
@@ -754,6 +784,10 @@ def register_routes(app: Flask):
                 Target.user_id.in_(filter_ids)
             ).scalar()
 
+            # Skip service areas with no saved target at all
+            if not target_count and not target_etb:
+                continue
+
             actual_q = Activity.query.filter(
                 Activity.fiscal_year == year, Activity.quarter == quarter,
                 Activity.service_area == sa, Activity.user_id.in_(filter_ids)
@@ -788,10 +822,11 @@ def register_routes(app: Flask):
             "actual_etb": total_actual_etb,
             "pct_etb": (total_actual_etb / total_target_etb) if total_target_etb else 0,
         }
-
+        has_targets = len(rows) > 0
         return render_template(
             "quarterly_target.html",
             year=year, quarter=quarter, rows=rows, totals=totals,
+            has_targets=has_targets,
             years=config.YEARS, quarters=config.QUARTERS,
             staff_groups=staff_groups, selected_staff=selected_staff, staff_id=staff_id,
         )
@@ -908,8 +943,9 @@ def register_routes(app: Flask):
                         flash("Target added.", "success")
                 return _back(f"#{quarter}")
 
-            # 3) Bulk save
+           # 3) Bulk save
             last_quarter = None
+            changed = False
             for key, value in form.items():
                 if key.startswith("count_") or key.startswith("etb_"):
                     kind, target_id = key.split("_", 1)
@@ -929,8 +965,12 @@ def register_routes(app: Flask):
                         else:
                             t.target_etb = num
                         last_quarter = t.quarter
-            db.session.commit()
-            flash("Targets saved.", "success")
+                        changed = True
+            if changed:
+                db.session.commit()
+                flash("Targets saved.", "success")
+            else:
+                flash("No targets to save yet — use Add to create a new target first.", "info")
             return _back(f"#{last_quarter}" if last_quarter else "")
 
         # ---- GET ----

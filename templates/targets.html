@@ -14,7 +14,9 @@
   <div>
     <label>Select Staff</label>
     <select name="staff_id" onchange="this.form.submit()">
+      {% if current_user.role not in ('manager', 'director') %}
       <option value="" {% if staff_id is none %}selected{% endif %}>Myself</option>
+      {% endif %}
       {% if visible_staff %}
       <option value="0" {% if staff_id == 0 %}selected{% endif %}>-- All My Staff (Total) --</option>
       {% endif %}

@@ -179,10 +179,12 @@ function populateMidFromDirector(dirId) {
   } else if (selectedId !== null && level === 'manager') {
     const mg = tree.find(m => m.manager.id === selectedId);
     if (mg) {
+      topSelect.value = 'mgr:' + mg.manager.id;
       populateBottomFromManager(tree, selectedId);
     } else {
       const ownerMg = tree.find(m => m.staff.some(s => s.id === selectedId));
       if (ownerMg) {
+        topSelect.value = 'mgr:' + ownerMg.manager.id;
         populateBottomFromManager(tree, ownerMg.manager.id);
         bottomSelect.value = 'staff:' + selectedId;
       }

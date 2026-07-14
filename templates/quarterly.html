@@ -44,6 +44,8 @@
       <td>{{ row.delayed }}</td>
       <td>{{ "%.0f"|format(row.etb or 0) }}</td>
     </tr>
+    {% else %}
+    <tr><td colspan="6" style="text-align:center;color:#52606d;">No activities logged for this quarter yet.</td></tr>
     {% endfor %}
   </tbody>
 </table>

@@ -57,7 +57,16 @@
       <td>{{ a.fiscal_year }}</td>
       <td>{{ a.service_area }}</td>
       <td>{{ a.specific_activity }}</td>
-      <td><span class="status-pill status-{{ a.status }}">{{ a.status }}</span></td>
+      <td>
+        <span class="status-pill status-{{ a.status }}">{{ a.status }}</span>
+        {% if a.approval_status == "pending" %}
+          <br><span class="status-pill status-pending">Pending Approval</span>
+        {% elif a.approval_status == "approved" %}
+          <br><span class="status-pill status-approved">✔ Approved</span>
+        {% elif a.approval_status == "rejected" %}
+          <br><span class="status-pill status-rejected" title="{{ a.approval_note }}">Rejected</span>
+        {% endif %}
+      </td>
       <td>{{ "%.0f"|format(a.financial_result or 0) }}</td>
       <td>
         <button type="button" class="btn btn-secondary btn-view"
@@ -89,6 +98,27 @@
         <form method="post" action="{{ url_for('activity_delete', activity_id=a.id) }}"
               style="display:inline" onsubmit="return confirm('Delete this activity?');">
           <button type="submit" style="background:none;border:none;color:#c0392b;cursor:pointer;">Delete</button>
+        </form>
+        {% endif %}
+
+        {% if a.user_id == current_user.id and a.approval_status in ("none", "rejected") and a.status != "completed" %}
+        &nbsp;
+        <form method="post" action="{{ url_for('activity_request_closure', activity_id=a.id) }}" style="display:inline">
+          <button type="submit" class="btn btn-secondary">Request Closure</button>
+        </form>
+        {% endif %}
+
+        {% if a.approval_status == "pending" and (current_user.role in ("director","vp","admin") or (a.user and a.user.manager_id == current_user.id)) %}
+        &nbsp;
+        <form method="post" action="{{ url_for('activity_approve', activity_id=a.id) }}" style="display:inline">
+          <input type="hidden" name="decision" value="approve">
+          <button type="submit" class="btn" style="background:#2e7d32;color:#fff;">Approve</button>
+        </form>
+        <form method="post" action="{{ url_for('activity_approve', activity_id=a.id) }}" style="display:inline"
+              onsubmit="return promptReject(this);">
+          <input type="hidden" name="decision" value="reject">
+          <input type="hidden" name="note" class="reject-note">
+          <button type="submit" class="btn btn-secondary" style="color:#c0392b;">Reject</button>
         </form>
         {% endif %}
       </td>
@@ -185,6 +215,9 @@
 }
 .detail-grid dt { font-weight: 600; color: #444; }
 .detail-grid dd { margin: 0; word-break: break-word; }
+.status-pending { background:#fff3cd; color:#856404; }
+.status-approved { background:#d4edda; color:#2e7d32; }
+.status-rejected { background:#f8d7da; color:#c0392b; }
 </style>
 
 <script>
@@ -215,6 +248,13 @@ function openActivityModal(data) {
 function closeActivityModal(event) {
   document.getElementById('activityModalBackdrop').classList.remove('open');
   document.body.style.overflow = '';
+}
+
+function promptReject(form) {
+  const note = prompt("Reason for rejecting (optional):", "");
+  if (note === null) return false;
+  form.querySelector('.reject-note').value = note;
+  return true;
 }
 
 document.addEventListener('keydown', function(e) {

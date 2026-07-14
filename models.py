@@ -1,5 +1,6 @@
 import math
 from datetime import date, datetime
+from extensions import db
 
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
@@ -175,10 +176,16 @@ class Activity(db.Model):
     status = db.Column(db.String(30), default="Planned")
     responsible_org = db.Column(db.String(255))
     remarks = db.Column(db.Text)
-
+    approval_status = db.Column(db.String(20), nullable=False, default="none")
+    approved_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)
+    approval_note = db.Column(db.String(255), nullable=True)
+    approver = db.relationship("User", foreign_keys=[approved_by_id])
     # link to user
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    user = db.relationship("User", backref="activities")
+    user = db.relationship("User", foreign_keys=[user_id], backref="activities")
+
+   
 
     def set_date(self, d: date):
         """Set the date and refresh every auto-calculated column, exactly
