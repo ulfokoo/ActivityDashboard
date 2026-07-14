@@ -1113,6 +1113,43 @@ def register_routes(app: Flask):
         db.session.commit()
         flash(f"Renamed '{old_name}' to '{new_name}' (existing records updated too).", "success")
         return redirect(url_for("service_area_list"))
+    
+    @app.route("/admin/service-areas/add", methods=["POST"])
+    @login_required
+    def service_area_add():
+        if current_user.role not in ("admin", "manager", "vp", "director"):
+            flash("Not authorized.", "danger")
+            return redirect(url_for("service_area_list"))
+
+        name = (request.form.get("name") or "").strip()
+        if not name:
+            flash("Service area name is required.", "danger")
+            return redirect(url_for("service_area_list"))
+        if ServiceArea.query.filter_by(name=name).first():
+            flash("A service area with that name already exists.", "danger")
+            return redirect(url_for("service_area_list"))
+
+        manager_id = request.form.get("manager_id", type=int)
+
+        if current_user.role == "manager":
+            creator_id = current_user.id
+            assigner_id = current_user.id
+        else:
+            creator_id = manager_id if manager_id else current_user.id
+            assigner_id = current_user.id
+
+        area = ServiceArea(
+            name=name,
+            created_by_id=creator_id,
+            assigned_by_id=assigner_id,
+            is_active=True,
+        )
+
+        db.session.add(area)
+        db.session.commit()
+        _propagate_new_service_area_to_quarters(area.name)
+        flash(f"Service area '{name}' created.", "success")
+        return redirect(url_for("service_area_list"))
 
     @app.route("/admin/service-areas/<int:area_id>/toggle", methods=["POST"])
     @login_required
