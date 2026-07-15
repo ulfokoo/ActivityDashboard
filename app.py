@@ -37,9 +37,33 @@ def create_app():
     app.config.from_object(config.Config)
 
     db.init_app(app)
+
+    with app.app_context():
+        from sqlalchemy import inspect
+        inspector = inspect(db.engine)
+        if "users" in inspector.get_table_names():
+            existing_columns = {col["name"] for col in inspector.get_columns("users")}
+            with db.engine.connect() as conn:
+                if "password_reset_requested" not in existing_columns:
+                    conn.execute(db.text(
+                        "ALTER TABLE users ADD COLUMN password_reset_requested BOOLEAN NOT NULL DEFAULT FALSE"
+                    ))
+                    conn.commit()
+                if "password_reset_allowed" not in existing_columns:
+                    conn.execute(db.text(
+                        "ALTER TABLE users ADD COLUMN password_reset_allowed BOOLEAN NOT NULL DEFAULT FALSE"
+                    ))
+                    conn.commit()
+
     login_manager.init_app(app)
     mail.init_app(app)
     app.register_blueprint(auth_bp)
+    @app.teardown_appcontext
+    def shutdown_session(exception=None):
+        db.session.remove()
+
+
+
     @app.teardown_appcontext
     def shutdown_session(exception=None):
             db.session.remove()
