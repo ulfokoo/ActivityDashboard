@@ -50,19 +50,21 @@ class LoginForm(FlaskForm):
     password = PasswordField("Password", validators=[DataRequired()])
     remember_me = BooleanField("Remember me")
     submit = SubmitField("Log In")
+
+
 class ForgotPasswordForm(FlaskForm):
     email = StringField("Email", validators=[DataRequired(), Email()])
-    submit = SubmitField("Send Reset Code")
+    submit = SubmitField("Request Password Reset")
 
 
 class ResetPasswordForm(FlaskForm):
-    otp_code = StringField("Verification Code", validators=[DataRequired(), Length(min=6, max=6)])
-    password = PasswordField("New Password", validators=[DataRequired(), Length(min=8)])
+    password = PasswordField("New Password", validators=[DataRequired()])
     confirm_password = PasswordField(
         "Confirm New Password",
         validators=[DataRequired(), EqualTo("password", message="Passwords must match.")],
     )
     submit = SubmitField("Reset Password")
+
 
 class ActivityForm(FlaskForm):
     date = DateField("Date", validators=[DataRequired()])
@@ -92,7 +94,7 @@ class ActivityForm(FlaskForm):
         validators=[Optional(), FileAllowed(config.ALLOWED_DOCUMENT_EXTENSIONS, "Unsupported file type.")],
     )
     result_outcome = TextAreaField("Result / Outcome", validators=[Optional()])
-    financial_result = FloatField("Financial Result (ETB)", validators=[Optional()], default=0)
+    financial_result = FloatField("Financial Result (USD)", validators=[Optional()], default=0)
     future_plan = TextAreaField("Future Plan / Next Steps", validators=[Optional()])
 
     status = SelectField("Status", choices=_choices(config.STATUSES), validators=[DataRequired()])
@@ -118,6 +120,8 @@ class TargetForm(FlaskForm):
     target_count = FloatField("Target (Count)", validators=[Optional()], default=0)
     target_etb = FloatField("Target (ETB)", validators=[Optional()], default=0)
     submit = SubmitField("Save Target")
+
+
 class OTPForm(FlaskForm):
     otp_code = StringField("Verification Code", validators=[DataRequired(), Length(min=6, max=6)])
     submit = SubmitField("Verify")

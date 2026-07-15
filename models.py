@@ -37,6 +37,11 @@ class User(UserMixin, db.Model):
     # admin approves them.
     is_approved = db.Column(db.Boolean, nullable=False, default=False)
 
+    # Admin-approved password reset flow: user requests a reset, an admin
+    # must explicitly allow it before the user can actually set a new password.
+    password_reset_requested = db.Column(db.Boolean, nullable=False, default=False)
+    password_reset_allowed = db.Column(db.Boolean, nullable=False, default=False)
+
     # Reporting hierarchy: who this user reports to (their manager/director/VP)
     manager_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     manager = db.relationship("User", remote_side=[id], backref="direct_reports")

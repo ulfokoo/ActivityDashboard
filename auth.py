@@ -5,6 +5,7 @@ Handles user accounts:
   - Self-registration (new accounts are created but marked "pending" —
     they cannot log in until an admin approves them)
   - Login / logout
+  - Forgot password -> admin approval -> user sets new password
   - An admin-only "Manage Users" screen to approve/reject pending accounts
     and promote/demote staff <-> admin.
 """
@@ -22,7 +23,7 @@ from flask_login import (
     login_user, logout_user, login_required, current_user,
 )
 
-from models import db, User
+from models import db, User, notify_users
 from forms import RegisterForm, LoginForm, OTPForm, ForgotPasswordForm, ResetPasswordForm
 
 auth_bp = Blueprint("auth", __name__)
@@ -148,39 +149,55 @@ def resend_otp(user_id):
     _send_otp_email(user)
     flash("A new code has been sent to your email.", "info")
     return redirect(url_for("auth.verify_email", user_id=user.id))
+
+
+# ---------------------------------------------------------------------------
+# Forgot / Reset password — admin-approved flow
+# ---------------------------------------------------------------------------
 @auth_bp.route("/forgot-password", methods=["GET", "POST"])
 def forgot_password():
     form = ForgotPasswordForm()
     if form.validate_on_submit():
         user = User.query.filter_by(email=form.email.data.lower().strip()).first()
         if user:
-            _send_otp_email(user)
-        flash("If that email is registered, a reset code has been sent.", "info")
-        return redirect(url_for("auth.reset_password", user_id=user.id if user else 0))
+            user.password_reset_requested = True
+            user.password_reset_allowed = False
+            db.session.commit()
+
+            admin_ids = [u.id for u in User.query.filter_by(role="admin", is_approved=True).all()]
+            notify_users(
+                admin_ids,
+                f"{user.full_name} has requested a password reset.",
+                link=url_for("auth.manage_users"),
+            )
+            db.session.commit()
+
+        flash("If that email is registered, your request has been sent to an admin for approval.", "info")
+        return redirect(url_for("auth.login"))
+
     return render_template("auth/forgot_password.html", form=form)
 
 
 @auth_bp.route("/reset-password/<int:user_id>", methods=["GET", "POST"])
 def reset_password(user_id):
     user = User.query.get_or_404(user_id)
+
+    if not user.password_reset_allowed:
+        flash("Password reset has not been approved by an admin yet.", "info")
+        return redirect(url_for("auth.login"))
+
     form = ResetPasswordForm()
     if form.validate_on_submit():
-        if (
-            user.otp_code != form.otp_code.data
-            or not user.otp_expires_at
-            or user.otp_expires_at < datetime.utcnow()
-        ):
-            flash("Invalid or expired code. Please request a new one.", "danger")
-            return redirect(url_for("auth.forgot_password"))
-
         user.set_password(form.password.data)
-        user.otp_code = None
-        user.otp_expires_at = None
+        user.password_reset_requested = False
+        user.password_reset_allowed = False
         db.session.commit()
         flash("Your password has been reset. You can now log in.", "success")
         return redirect(url_for("auth.login"))
 
     return render_template("auth/reset_password.html", form=form, user_id=user_id)
+
+
 @auth_bp.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
@@ -228,11 +245,13 @@ def manage_users():
         pending = User.query.filter_by(is_approved=False).order_by(User.created_at.desc()).all()
         approved = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
         possible_managers = [u for u in approved if u.role != "staff"]
+        reset_requests = User.query.filter_by(password_reset_requested=True).order_by(User.full_name).all()
         return render_template(
             "auth/manage_users.html",
             pending=pending,
             approved=approved,
             possible_managers=possible_managers,
+            reset_requests=reset_requests,
         )
 
 
@@ -313,4 +332,36 @@ def remove_user(user_id):
     db.session.delete(user)
     db.session.commit()
     flash(f"{user.full_name}'s account has been removed.", "info")
+    return redirect(url_for("auth.manage_users"))
+
+
+@auth_bp.route("/admin/users/<int:user_id>/allow-reset", methods=["POST"])
+@login_required
+@admin_required
+def allow_password_reset(user_id):
+    user = User.query.get_or_404(user_id)
+    user.password_reset_allowed = True
+    user.password_reset_requested = False
+    db.session.commit()
+
+    notify_users(
+        [user.id],
+        "An admin has approved your password reset request.",
+        link=url_for("auth.reset_password", user_id=user.id),
+    )
+    db.session.commit()
+
+    flash(f"{user.full_name} can now reset their password.", "success")
+    return redirect(url_for("auth.manage_users"))
+
+
+@auth_bp.route("/admin/users/<int:user_id>/deny-reset", methods=["POST"])
+@login_required
+@admin_required
+def deny_password_reset(user_id):
+    user = User.query.get_or_404(user_id)
+    user.password_reset_requested = False
+    user.password_reset_allowed = False
+    db.session.commit()
+    flash(f"{user.full_name}'s reset request has been denied.", "info")
     return redirect(url_for("auth.manage_users"))

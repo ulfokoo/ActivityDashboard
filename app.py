@@ -1034,6 +1034,9 @@ def register_routes(app: Flask):
             can_add=(staff_id != 0),
         )
     
+
+
+    
     @app.route("/notifications")
     @login_required
     def notifications_list():

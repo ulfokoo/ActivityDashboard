@@ -32,6 +32,34 @@
 <p style="color:#52606d;">No pending registrations.</p>
 {% endif %}
 
+<h2 class="section-title">Password Reset Requests ({{ reset_requests|length }})</h2>
+{% if reset_requests %}
+<table style="margin-bottom:20px;">
+  <thead>
+    <tr><th>Name</th><th>Email</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for u in reset_requests %}
+    <tr>
+      <td>{{ u.full_name }}</td>
+      <td>{{ u.email }}</td>
+      <td>
+        <form method="post" action="{{ url_for('auth.allow_password_reset', user_id=u.id) }}" style="display:inline">
+          <button type="submit" class="btn">Allow Reset</button>
+        </form>
+        <form method="post" action="{{ url_for('auth.deny_password_reset', user_id=u.id) }}" style="display:inline"
+              onsubmit="return confirm('Deny this password reset request?');">
+          <button type="submit" class="btn btn-danger">Deny</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:#52606d;">No pending password reset requests.</p>
+{% endif %}
+
 <h2 class="section-title">Approved Users ({{ approved|length }})</h2>
 <table>
   <thead>
