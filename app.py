@@ -875,11 +875,16 @@ def register_routes(app: Flask):
         if current_user.role == "admin":
             visible_staff = User.query.filter_by(is_approved=True).order_by(User.full_name).all()
         else:
-            # Restrict target assignment to exactly one level down:
-            # VP -> Director, Director -> Manager, Manager -> Staff
+            # Restrict target assignment to exactly one level down (VP -> Director,
+            # Director -> Manager, Manager -> Staff) — but also include anyone who
+            # reports directly to this user, even if their role skips a level
+            # (e.g. a Staff member assigned straight to a Director by an admin).
             target_role = ASSIGNABLE_ROLE.get(current_user.role)
             all_subordinates = get_all_subordinates(current_user)
-            visible_staff = [u for u in all_subordinates if u.role == target_role]
+            visible_staff = [
+                u for u in all_subordinates
+                if u.role == target_role or u.manager_id == current_user.id
+            ]
         visible_ids = {u.id for u in visible_staff}
 
         if not visible_staff and current_user.role != "admin":
@@ -1028,7 +1033,7 @@ def register_routes(app: Flask):
             staff_id=staff_id,
             can_add=(staff_id != 0),
         )
-   
+    
     @app.route("/notifications")
     @login_required
     def notifications_list():
@@ -1196,7 +1201,7 @@ def register_routes(app: Flask):
         flash(f"Renamed '{old_name}' to '{new_name}' (existing records updated too).", "success")
         return redirect(url_for("service_area_list"))
     
-    
+
     @app.route("/admin/service-areas/add", methods=["POST"])
     @login_required
     def service_area_add():
