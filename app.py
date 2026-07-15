@@ -15,6 +15,7 @@ from models import (
     get_wing_owner_id, visible_service_area_owner_ids,
     Notification, notify_users,
 )
+
 from forms import ActivityForm, TargetForm
 from auth import auth_bp, admin_required
 from extensions import mail
@@ -388,6 +389,22 @@ def _save_uploaded_document(file_storage):
     return saved_name, original_name
 
 
+def _target_service_areas(year, filter_ids, quarter=None):
+    """
+    Returns the distinct list of service areas that have targets set
+    for the given year (optionally narrowed to one quarter), scoped to
+    the given set of user ids (filter_ids).
+    """
+    q = Target.query.filter(
+        Target.year == year,
+        Target.user_id.in_(filter_ids),
+    )
+    if quarter is not None:
+        q = q.filter(Target.quarter == quarter)
+
+    areas = [row[0] for row in q.with_entities(Target.service_area).distinct().all()]
+    return sorted(areas)
+
 def register_routes(app: Flask):
 
 
@@ -723,8 +740,11 @@ def register_routes(app: Flask):
                 .filter(Activity.year == year, Activity.month == month, Activity.user_id.in_(filter_ids)).scalar(),
         )
 
-        active_areas = [a.name for a in _scoped_service_areas_query(current_user)
-                        .order_by(ServiceArea.sort_order, ServiceArea.name).all()]
+        month_index = config.MONTHS.index(month) + 1
+        month_date = date(year, month_index, 1)
+        target_fiscal_year = calc_fiscal_year(month_date)
+        target_quarter = calc_quarter(month_date)
+        active_areas = _target_service_areas(target_fiscal_year, filter_ids, quarter=target_quarter)
 
         breakdown = []
         for sa in active_areas:
@@ -770,15 +790,10 @@ def register_routes(app: Flask):
                         Activity.user_id.in_(filter_ids)).scalar(),
         )
 
-        breakdown_counts = (
-            base.with_entities(Activity.service_area, func.count(Activity.id))
-            .group_by(Activity.service_area)
-            .all()
-        )
-        areas_with_activity = [row[0] for row in breakdown_counts if row[0]]
+        active_areas = _target_service_areas(year, filter_ids, quarter=quarter)
 
         breakdown = []
-        for sa in areas_with_activity:
+        for sa in active_areas:
             rows = base.filter(Activity.service_area == sa)
             breakdown.append(dict(
                 service_area=sa,
@@ -1090,7 +1105,7 @@ def register_routes(app: Flask):
         db.session.commit()
         return jsonify({"ok": True})
 
-    # ------------------------------------------------------------------
+# ------------------------------------------------------------------
     # Annual Dashboard (mirrors "Annual Dashboard" sheet)
     # ------------------------------------------------------------------
     @app.route("/annual")
@@ -1111,7 +1126,7 @@ def register_routes(app: Flask):
                 .filter(Activity.fiscal_year == year, Activity.user_id.in_(filter_ids)).scalar(),
         )
 
-        active_areas = [a.name for a in _scoped_service_areas_query(current_user).all()]
+        active_areas = _target_service_areas(year, filter_ids)
 
         matrix = []
         for sa in active_areas:
