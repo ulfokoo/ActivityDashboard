@@ -500,6 +500,25 @@ def register_routes(app: Flask):
             flash("Activity updated.", "success")
             return redirect(url_for("activity_list"))
         return render_template("activities/activity_form.html", form=form, title="Edit Activity", activity=a)
+
+    @app.route("/activities/<int:activity_id>/request-closure", methods=["POST"])
+    @login_required
+    def activity_request_closure(activity_id):
+        activity = Activity.query.get_or_404(activity_id)
+
+        if activity.user_id != current_user.id:
+            abort(403)
+
+        if activity.approval_status not in ("none", "rejected") or activity.status == "completed":
+            flash("This activity cannot be submitted for closure.", "error")
+            return redirect(url_for("activity_list"))
+
+        activity.approval_status = "pending"
+        activity.approval_note = None
+        db.session.commit()
+
+        flash("Closure requested — awaiting approval.", "success")
+        return redirect(url_for("activity_list"))
    
     def _user_brief(u):
         return {"id": u.id, "full_name": u.full_name, "role": u.role}
@@ -1089,7 +1108,12 @@ def register_routes(app: Flask):
 
         teams = Team.query.order_by(Team.name).all()
         managers = User.query.filter_by(role="manager", is_approved=True).order_by(User.full_name).all()
-        return render_template("admin/teams.html", teams=teams, managers=managers)
+
+        directors = []
+        if current_user.role in ("admin", "vp"):
+            directors = User.query.filter_by(role="director", is_approved=True).order_by(User.full_name).all()
+
+        return render_template("admin/teams.html", teams=teams, managers=managers, directors=directors)
 
     @app.route("/admin/teams/add", methods=["POST"])
     @login_required
@@ -1127,7 +1151,25 @@ def register_routes(app: Flask):
         db.session.commit()
         flash(f"{manager.full_name} updated.", "success")
         return redirect(url_for("team_list"))
-    
+
+    @app.route("/admin/teams/assign-director", methods=["POST"])
+    @login_required
+    def team_assign_director():
+        if current_user.role not in ("admin", "vp"):
+            flash("Not authorized.", "danger")
+            return redirect(url_for("team_list"))
+
+        director_id = request.form.get("director_id", type=int)
+        team_id = request.form.get("team_id", type=int)
+        director = User.query.filter_by(id=director_id, role="director").first()
+        if not director:
+            flash("Director not found.", "danger")
+            return redirect(url_for("team_list"))
+
+        director.team_id = team_id if team_id else None
+        db.session.commit()
+        flash(f"{director.full_name} updated.", "success")
+        return redirect(url_for("team_list"))
 
     @app.route("/admin/service-areas/<int:area_id>/rename", methods=["POST"])
     @login_required
@@ -1153,6 +1195,7 @@ def register_routes(app: Flask):
         db.session.commit()
         flash(f"Renamed '{old_name}' to '{new_name}' (existing records updated too).", "success")
         return redirect(url_for("service_area_list"))
+    
     
     @app.route("/admin/service-areas/add", methods=["POST"])
     @login_required

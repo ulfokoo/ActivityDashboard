@@ -3,7 +3,6 @@
   <label>View Staff</label>
   <select name="__staff_top" id="staffTopSelect">
     <option value="myself" {% if not selected_staff and request.args.get('staff_id') != '0' %}selected{% endif %}>Myself</option>
-    <option value="all" {% if request.args.get('staff_id') == '0' %}selected{% endif %}>All Staff (Combined)</option>
     {% if staff_groups.level == "director" %}
       {% for dg in staff_groups.groups %}
       <option value="dir:{{ dg.director.id }}" {% if selected_staff and selected_staff.id == dg.director.id %}selected{% endif %}>

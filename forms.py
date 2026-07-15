@@ -37,7 +37,7 @@ class RegisterForm(FlaskForm):
     id_no = StringField("ID No.", validators=[DataRequired(), Length(max=50)])
     segment = StringField("Segment", validators=[DataRequired(), Length(max=120)])
     position = StringField("Position", validators=[DataRequired(), Length(max=120)])
-    password = PasswordField("Password", validators=[DataRequired(), Length(min=8)])
+    password = PasswordField("Password", validators=[DataRequired()])
     confirm_password = PasswordField(
         "Confirm Password",
         validators=[DataRequired(), EqualTo("password", message="Passwords must match.")],

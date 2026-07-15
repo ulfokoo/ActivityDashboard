@@ -240,6 +240,11 @@ th, td {
   text-align: left;
   font-size: 0.88rem;
 }
+.wrap-if-long {
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+}
 th { background: var(--navy); color: white; font-weight: 600; }
 tr:hover { background: #f0f4f8; }
 

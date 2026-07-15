@@ -6,7 +6,7 @@
 <p style="color: #52606d;">Add, rename, activate/deactivate, or delete the Service Area categories used across the app.</p>
 
 <form method="POST" action="{{ url_for('service_area_add') }}" style="margin-bottom: 20px; display: flex; gap: 8px; align-items: center;">
-    <input type="text" name="name" placeholder="New service area name" required>
+    <input type="text" name="name" placeholder="New service area name" maxlength="none" required style="width: 220px;">
 
     {% if current_user.role in ("admin", "vp", "director") %}
     <select name="manager_id">
@@ -29,7 +29,8 @@
         <tr>
             <td>
                 <form method="POST" action="{{ url_for('service_area_rename', area_id=area.id) }}" style="display: flex; gap: 8px;">
-                    <input type="text" name="name" value="{{ area.name }}">
+                    <input type="text" name="name" value="{{ area.name }}" maxlength="100
+">
                     <button type="submit">Rename</button>
                 </form>
             </td>
