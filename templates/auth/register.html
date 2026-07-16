@@ -15,8 +15,28 @@
     <div class="full">{{ form.id_no.label }} {{ form.id_no() }}</div>
     <div class="full">{{ form.segment.label }} {{ form.segment() }}</div>
     <div class="full">{{ form.position.label }} {{ form.position() }}</div>
-    <div class="full">{{ form.password.label }} {{ form.password() }}</div>
-    <div class="full">{{ form.confirm_password.label }} {{ form.confirm_password() }}</div>
+    <div class="full">{{ form.code.label }} {{ form.code(placeholder="Code from your supervisor") }}</div>
+    <div class="full">
+      {{ form.password.label }}
+      <div style="position:relative;">
+        {{ form.password(id="password-field", style="padding-right:70px; width:100%; box-sizing:border-box;") }}
+        <button type="button" onclick="togglePassword('password-field', this)"
+                style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:#2b6cb0; cursor:pointer; font-size:0.85em;">
+          Show
+        </button>
+      </div>
+    </div>
+
+    <div class="full">
+      {{ form.confirm_password.label }}
+      <div style="position:relative;">
+        {{ form.confirm_password(id="confirm-password-field", style="padding-right:70px; width:100%; box-sizing:border-box;") }}
+        <button type="button" onclick="togglePassword('confirm-password-field', this)"
+                style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:#2b6cb0; cursor:pointer; font-size:0.85em;">
+          Show
+        </button>
+      </div>
+    </div>
 
     <div class="form-actions">
       {{ form.submit(class="btn") }}
@@ -26,4 +46,16 @@
 <p style="margin-top:14px;">
   Already have an account? <a href="{{ url_for('auth.login') }}">Log in</a>.
 </p>
+<script>
+function togglePassword(fieldId, btn) {
+  const field = document.getElementById(fieldId);
+  if (field.type === "password") {
+    field.type = "text";
+    btn.textContent = "Hide";
+  } else {
+    field.type = "password";
+    btn.textContent = "Show";
+  }
+}
+</script>
 {% endblock %}

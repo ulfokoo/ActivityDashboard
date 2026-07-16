@@ -8,6 +8,8 @@ from wtforms.validators import DataRequired, Optional, Length, Email, EqualTo
 
 import config
 from models import ServiceArea, visible_service_area_owner_ids, db
+from datetime import date as _date
+from models import ServiceArea, visible_service_area_owner_ids, db, calc_quarter, calc_fiscal_year
 from flask_login import current_user
 from sqlalchemy import or_
 
@@ -37,6 +39,7 @@ class RegisterForm(FlaskForm):
     id_no = StringField("ID No.", validators=[DataRequired(), Length(max=50)])
     segment = StringField("Segment", validators=[DataRequired(), Length(max=120)])
     position = StringField("Position", validators=[DataRequired(), Length(max=120)])
+    code = StringField("Registration Code", validators=[DataRequired(), Length(max=20)])
     password = PasswordField("Password", validators=[DataRequired()])
     confirm_password = PasswordField(
         "Confirm Password",
@@ -67,13 +70,18 @@ class ResetPasswordForm(FlaskForm):
 
 
 class ActivityForm(FlaskForm):
-    date = DateField("Date", validators=[DataRequired()])
+    date = DateField("Date", validators=[DataRequired()], default=_date.today)
 
     service_area = SelectField("Service Area", validators=[DataRequired()])
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.service_area.choices = _active_service_area_choices()
+        reference_date = self.date.data or _date.today()
+        current_quarter = calc_quarter(reference_date)
+        self.service_area.choices = _active_service_area_choices_for_quarter(current_quarter) + [("Other", "Other")]
+        current = self.service_area.data
+        if current and current not in dict(self.service_area.choices):
+            self.service_area.choices.append((current, f"{current} (inactive)"))
     specific_activity = StringField("Specific Activity / Sub-task", validators=[Optional(), Length(max=255)])
     description = TextAreaField("Activity Description", validators=[Optional()])
 
@@ -125,3 +133,18 @@ class TargetForm(FlaskForm):
 class OTPForm(FlaskForm):
     otp_code = StringField("Verification Code", validators=[DataRequired(), Length(min=6, max=6)])
     submit = SubmitField("Verify")
+
+class ProfilePhotoForm(FlaskForm):
+    photo = FileField(
+        "Profile Photo",
+        validators=[Optional(), FileAllowed(["jpg", "jpeg", "png", "webp"], "Images only.")],
+    )
+    submit = SubmitField("Update Photo")
+def _active_service_area_choices_for_quarter(quarter):
+    from app import _quarter_service_areas  # lazy import, avoids circular import
+    year = calc_fiscal_year(_date.today())
+    names = _quarter_service_areas(
+        year, quarter,
+        for_user=current_user if current_user.is_authenticated else None,
+    )
+    return [(n, n) for n in names]

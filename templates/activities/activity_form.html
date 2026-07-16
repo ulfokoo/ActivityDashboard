@@ -6,16 +6,72 @@
 <form method="post" class="form-grid" novalidate enctype="multipart/form-data">
   {{ form.hidden_tag() }}
 
-  <div>{{ form.date.label }} {{ form.date(type="date") }}</div>
-  <div>{{ form.service_area.label }} {{ form.service_area() }}</div>
+<div>{{ form.date.label }} {{ form.date(type="date") }}</div>
+  <div>
+    {{ form.service_area.label }} {{ form.service_area(id="serviceAreaSelect") }}
+  </div>
+  <div class="full" id="otherServiceAreaWrap" style="display:none;">
+    <label for="customServiceArea">Specify Service Area</label>
+    <input type="text" name="custom_service_area" id="customServiceArea" placeholder="Type the service area you did today">
+  </div>
+
+  <script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const select = document.getElementById('serviceAreaSelect');
+    const wrap = document.getElementById('otherServiceAreaWrap');
+    function toggleOther() {
+      wrap.style.display = (select.value === 'Other') ? 'block' : 'none';
+    }
+    select.addEventListener('change', toggleOther);
+    toggleOther();
+  });
+  </script>
+  </script>
 
   <div class="full">{{ form.specific_activity.label }} {{ form.specific_activity() }}</div>
   <div class="full">{{ form.description.label }} {{ form.description(rows=3) }}</div>
 
-  <div>{{ form.where_location.label }} {{ form.where_location() }}</div>
+  <div>
+    {{ form.where_location.label }} {{ form.where_location(id="whereLocationSelect") }}
+  </div>
+  <div class="full" id="otherWhereWrap" style="display:none;">
+    <label for="customWhereLocation">Specify Location / Platform</label>
+    <input type="text" name="custom_where_location" id="customWhereLocation" placeholder="Type the location or platform">
+  </div>
+
+  <script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const whereSelect = document.getElementById('whereLocationSelect');
+    const whereWrap = document.getElementById('otherWhereWrap');
+    function toggleWhereOther() {
+      whereWrap.style.display = (whereSelect.value === 'Other') ? 'block' : 'none';
+    }
+    whereSelect.addEventListener('change', toggleWhereOther);
+    toggleWhereOther();
+  });
+  </script>
   <div>{{ form.whom.label }} {{ form.whom() }}</div>
 
-  <div>{{ form.engagement_type.label }} {{ form.engagement_type() }}</div>
+  <div>
+    {{ form.engagement_type.label }} {{ form.engagement_type(id="engagementTypeSelect") }}
+  </div>
+  <div class="full" id="otherEngagementWrap" style="display:none;">
+    <label for="customEngagementType">Specify Engagement Type</label>
+    <input type="text" name="custom_engagement_type" id="customEngagementType" placeholder="Type the engagement type">
+  </div>
+
+  <script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const engagementSelect = document.getElementById('engagementTypeSelect');
+    const engagementWrap = document.getElementById('otherEngagementWrap');
+    function toggleEngagementOther() {
+      engagementWrap.style.display = (engagementSelect.value === 'Other') ? 'block' : 'none';
+    }
+    engagementSelect.addEventListener('change', toggleEngagementOther);
+    toggleEngagementOther();
+  });
+  </script>
+  
   <div>
     {{ form.document.label }} {{ form.document() }}
     {% if form.document.errors %}
@@ -32,12 +88,8 @@
     {% endif %}
   </div>
 
-  <div class="full">{{ form.result_outcome.label }} {{ form.result_outcome(rows=2) }}</div>
   <div>{{ form.financial_result.label }} {{ form.financial_result() }}</div>
   <div>{{ form.status.label }} {{ form.status() }}</div>
-
-  <div class="full">{{ form.future_plan.label }} {{ form.future_plan(rows=2) }}</div>
-  <div>{{ form.responsible_org.label }} {{ form.responsible_org() }}</div>
   <div class="full">{{ form.remarks.label }} {{ form.remarks(rows=2) }}</div>
 
   <div class="form-actions">

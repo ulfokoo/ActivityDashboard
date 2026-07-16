@@ -1,6 +1,8 @@
 import math
+import secrets
 from datetime import date, datetime
 from extensions import db
+
 
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
@@ -14,10 +16,12 @@ class User(UserMixin, db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     full_name = db.Column(db.String(120), nullable=False)
+    invite_code = db.Column(db.String(20), unique=True, nullable=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     team_id = db.Column(db.Integer, db.ForeignKey("teams.id"), nullable=True)
     team = db.relationship("Team", backref="members")
+    profile_photo = db.Column(db.String(255))  # filename on disk
 
     # "admin", "vp", "director", "manager", or "staff"
     role = db.Column(db.String(20), nullable=False, default="staff")
@@ -57,7 +61,49 @@ class User(UserMixin, db.Model):
     @property
     def is_admin(self) -> bool:
         return self.role == "admin"
+    
+def generate_unique_invite_code():
+    while True:
+        code = secrets.token_hex(4).upper()  # e.g. "A1B2C3D4"
+        if not User.query.filter_by(invite_code=code).first():
+            return code    
+class InviteCode(db.Model):
+    __tablename__ = "invite_codes"
 
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(20), unique=True, nullable=False)
+    owner_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    role = db.Column(db.String(20), nullable=False)  # the role this code grants
+    owner = db.relationship("User", backref="invite_codes")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# Which roles each role is allowed to invite. Normal = one level down.
+# Skip = two levels down, for direct reports that bypass a level.
+ALLOWED_INVITE_ROLES = {
+    "admin": ["vp"],
+    "vp": ["director", "manager"],       # manager = skip-level
+    "director": ["manager", "staff"],    # staff = skip-level
+    "manager": ["staff"],
+}
+
+
+def generate_invite_code_string():
+    while True:
+        code = secrets.token_hex(4).upper()
+        if not InviteCode.query.filter_by(code=code).first():
+            return code
+
+
+def get_or_create_invite_code(owner, role):
+    """Return owner's existing code for `role`, creating one if it doesn't exist yet."""
+    existing = InviteCode.query.filter_by(owner_id=owner.id, role=role).first()
+    if existing:
+        return existing
+    ic = InviteCode(code=generate_invite_code_string(), owner_id=owner.id, role=role)
+    db.session.add(ic)
+    db.session.commit()
+    return ic
 
 def get_all_subordinates(user):
     """Every user reporting up to `user`, at any depth. Safe against cycles."""

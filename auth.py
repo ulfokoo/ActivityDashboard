@@ -12,7 +12,11 @@ Handles user accounts:
 import os
 import requests
 import random
+import uuid
+from models import ASSIGNABLE_ROLE
 from datetime import datetime, timedelta
+from werkzeug.utils import secure_filename
+from forms import ProfilePhotoForm
 
 from flask_mail import Message
 from extensions import mail
@@ -23,7 +27,7 @@ from flask_login import (
     login_user, logout_user, login_required, current_user,
 )
 
-from models import db, User, notify_users
+from models import db, User, notify_users, InviteCode, ALLOWED_INVITE_ROLES, get_or_create_invite_code
 from forms import RegisterForm, LoginForm, OTPForm, ForgotPasswordForm, ResetPasswordForm
 
 auth_bp = Blueprint("auth", __name__)
@@ -91,6 +95,17 @@ def register():
             flash("An account with that email already exists.", "danger")
             return render_template("auth/register.html", form=form)
 
+        # Look up which invite code was entered
+        entered_code = form.code.data.strip().upper()
+        invite = InviteCode.query.filter_by(code=entered_code).first()
+
+        if not invite:
+            flash("Invalid registration code. Please check with your supervisor.", "danger")
+            return render_template("auth/register.html", form=form)
+
+        code_owner = invite.owner
+        assigned_role = invite.role
+
         user = User(
             full_name=form.full_name.data.strip(),
             email=form.email.data.lower().strip(),
@@ -98,18 +113,22 @@ def register():
             id_no=form.id_no.data.strip(),
             segment=form.segment.data.strip(),
             position=form.position.data.strip(),
-            role="staff",       # self-registered accounts are always staff
-            is_approved=False,  # must be approved by an admin before login
+            role=assigned_role,
+            manager_id=code_owner.id,
+            is_approved=True,  # code-based registration = vouched for by whoever shared the code
         )
+
         user.set_password(form.password.data)
         db.session.add(user)
         db.session.commit()
+        # Generate this new user's own invite codes (if their role can invite anyone)
+        for role in ALLOWED_INVITE_ROLES.get(assigned_role, []):
+            get_or_create_invite_code(user, role)
 
-        # TEMP: skip OTP verification
         user.email_verified = True
         db.session.commit()
 
-        flash("Account created! Waiting for admin approval.", "success")
+        flash("Account created! You can now log in.", "success")
         return redirect(url_for("auth.login"))
 
     return render_template("auth/register.html", form=form)
@@ -365,3 +384,23 @@ def deny_password_reset(user_id):
     db.session.commit()
     flash(f"{user.full_name}'s reset request has been denied.", "info")
     return redirect(url_for("auth.manage_users"))
+
+
+@auth_bp.route("/profile/photo", methods=["GET", "POST"])
+@login_required
+def upload_photo():
+    form = ProfilePhotoForm()
+    if form.validate_on_submit() and form.photo.data:
+        file = form.photo.data
+        ext = os.path.splitext(secure_filename(file.filename))[1]
+        saved_name = f"{uuid.uuid4().hex}{ext}"
+        upload_folder = os.path.join("static", "profile_photos")
+        os.makedirs(upload_folder, exist_ok=True)
+        file.save(os.path.join(upload_folder, saved_name))
+
+        current_user.profile_photo = saved_name
+        db.session.commit()
+        flash("Profile photo updated.", "success")
+        return redirect(url_for("dashboard"))
+
+    return render_template("auth/upload_photo.html", form=form)

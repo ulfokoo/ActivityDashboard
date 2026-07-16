@@ -14,7 +14,7 @@
 <body>
 
 <header class="app-header">
-  <div class="header-top">
+  <div class="header-top" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:nowrap; gap:16px; padding-right:24px;">
     <div class="brand-tagline">
       <span class="tagline-main">Simple Tracking, Better Insights</span>
       <span class="tagline-sub">Fast, Clear, Reliable — see where every service area stands.</span>
@@ -34,11 +34,67 @@
           <div id="notifEmpty" style="padding:20px; text-align:center; color:#888; display:none;">No notifications yet.</div>
         </div>
       </div>
-      {% set role_display = {"admin":"Admin","manager":"Manager","staff":"Staff","director":"Director","vp":"VP"} %}
-      <a class="btn-logout" href="{{ url_for('auth.logout') }}">
-        <i class="fa-regular fa-circle-user"></i>
-        Log Out <span class="user-name">({{ current_user.full_name }} – {{ role_display.get(current_user.role, current_user.role) }})</span>
-      </a>
+     {% set role_display = {"admin":"Admin","manager":"Manager","staff":"Staff","director":"Director","vp":"VP"} %}
+      <a href="{{ url_for('auth.upload_photo') }}" title="Change photo" style="display:flex; align-items:center; margin-right:4px; outline:none;">
+      {% if current_user.profile_photo %}
+        <img src="{{ url_for('static', filename='profile_photos/' ~ current_user.profile_photo) }}"
+             style="width:40px; height:40px; border-radius:50%; object-fit:cover; border:2px solid rgba(255,255,255,0.5);">
+      {% else %}
+        <i class="fa-regular fa-circle-user" style="font-size:2.2em; color:#fff;"></i>
+      {% endif %}
+    </a>
+    <div class="user-menu-wrap" style="position:relative; margin-right:8px;">
+        <button class="btn-icon user-menu-btn" id="userMenuBtn" style="
+            display:flex; align-items:center; gap:6px;
+            background:linear-gradient(135deg, var(--accent), var(--accent-700));
+            border:none; border-radius:999px;
+            padding:6px 14px; cursor:pointer; color:var(--primary-900); width:auto; height:auto;
+          ">
+        <div style="display:flex; flex-direction:column; align-items:flex-start; line-height:1.2; text-align:left;">
+          <span style="font-weight:600; font-size:0.9em; white-space:nowrap;">{{ current_user.full_name }}</span>
+          <span style="font-size:0.75em; opacity:0.85; white-space:nowrap;">{{ role_display.get(current_user.role, current_user.role) }}</span>
+        </div>
+      </button>
+
+        <div id="userMenuDropdown" style="
+            display:none; position:absolute; right:0; top:calc(100% + 8px);
+            background:#fff; color:#1a202c; border-radius:12px; min-width:240px;
+            box-shadow:0 10px 30px rgba(0,0,0,0.2); overflow:hidden; z-index:1000;
+          ">
+          <button type="button" id="menuToggleBtn" style="
+              display:flex; align-items:center; justify-content:space-between; width:100%;
+              padding:12px 16px; background:none; border:none; border-bottom:1px solid #edf2f7;
+              text-align:left; cursor:pointer; color:#1a202c; font-size:0.95em; font-family:inherit;
+            ">
+            <span><i class="fa-solid fa-bars" style="width:18px;"></i> Menu</span>
+            <i class="fa-solid fa-chevron-down" id="menuToggleIcon" style="font-size:0.75em; transition:transform .2s;"></i>
+          </button>
+          <div id="menuDetails" style="display:none; border-bottom:1px solid #edf2f7;">
+            {% if current_user.invite_codes %}
+            <div style="padding:12px 16px;">
+              <div style="font-size:0.8em; color:#718096; margin-bottom:4px;">Your Registration Codes</div>
+              <ul style="list-style:none; margin:0; padding:0; font-size:0.9em;">
+                {% for ic in current_user.invite_codes %}
+                  <li style="margin-bottom:4px;">{{ ic.role|capitalize }}: <code>{{ ic.code }}</code></li>
+                {% endfor %}
+              </ul>
+            </div>
+            {% endif %}
+            <div style="padding:12px 16px;">
+              <div style="font-size:0.8em; color:#718096; margin-bottom:4px;">Email</div>
+              <div style="font-size:0.9em; font-weight:600; word-break:break-all;">{{ current_user.email }}</div>
+            </div>
+            <div style="padding:12px 16px;">
+              <div style="font-size:0.8em; color:#718096; margin-bottom:4px;">ID Number</div>
+              <div style="font-size:0.9em; font-weight:600;">{{ current_user.id }}</div>
+            </div>
+            
+          </div>
+          <a href="{{ url_for('auth.logout') }}" style="display:block; padding:12px 16px; text-decoration:none; color:#e53e3e;">
+            <i class="fa-solid fa-right-from-bracket" style="width:18px;"></i> Log Out
+          </a>
+        </div>
+      </div>
       <button class="hamburger" id="hamburgerBtn" aria-label="Toggle navigation" aria-expanded="false">
         <span></span><span></span><span></span>
       </button>
@@ -89,14 +145,12 @@
 </nav>
   </nav>
   {% else %}
-  <nav class="app-nav">
-    <a href="{{ url_for('auth.login') }}" class="nav-link"><i class="fa-solid fa-right-to-bracket"></i> Log In</a>
-    <a href="{{ url_for('auth.register') }}" class="nav-link"><i class="fa-solid fa-user-plus"></i> Register</a>
-  </nav>
+ 
   {% endif %}
 </header>
 
 <main class="app-main">
+  {% if request.endpoint not in ('auth.login', 'auth.register') %}
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       {% for category, message in messages %}
@@ -104,6 +158,7 @@
       {% endfor %}
     {% endif %}
   {% endwith %}
+  {% endif %}
 
   {% block content %}{% endblock %}
 </main>
@@ -124,6 +179,32 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+const userMenuBtn = document.getElementById('userMenuBtn');
+const userMenuDropdown = document.getElementById('userMenuDropdown');
+if (userMenuBtn && userMenuDropdown) {
+  userMenuBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    userMenuDropdown.style.display = userMenuDropdown.style.display === 'block' ? 'none' : 'block';
+  });
+  document.addEventListener('click', function(e) {
+    if (!userMenuDropdown.contains(e.target) && e.target !== userMenuBtn) {
+      userMenuDropdown.style.display = 'none';
+    }
+  });
+}
+
+const menuToggleBtn = document.getElementById('menuToggleBtn');
+const menuDetails = document.getElementById('menuDetails');
+const menuToggleIcon = document.getElementById('menuToggleIcon');
+if (menuToggleBtn && menuDetails) {
+  menuToggleBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    const isOpen = menuDetails.style.display === 'block';
+    menuDetails.style.display = isOpen ? 'none' : 'block';
+    menuToggleIcon.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(180deg)';
+  });
+}
 </script>
 
 {% if current_user.is_authenticated %}

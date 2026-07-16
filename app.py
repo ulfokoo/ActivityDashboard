@@ -6,6 +6,8 @@ from datetime import date, datetime
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort, send_from_directory
 from flask_login import LoginManager, login_required, current_user
 from sqlalchemy import func, or_
+from models import calc_fiscal_year
+from datetime import date
 
 import config
 from models import (
@@ -13,7 +15,8 @@ from models import (
     calc_quarter, calc_fiscal_year, get_all_subordinates,
     ASSIGNABLE_ROLE, ROLE_RANK, can_manage_service_area,
     get_wing_owner_id, visible_service_area_owner_ids,
-    Notification, notify_users,
+    Notification, notify_users,generate_unique_invite_code,
+    InviteCode, ALLOWED_INVITE_ROLES, get_or_create_invite_code,
 )
 
 from forms import ActivityForm, TargetForm
@@ -72,6 +75,8 @@ def create_app():
     with app.app_context():
         db.create_all()
         _ensure_user_columns()
+        _backfill_invite_codes()
+        _ensure_invite_codes() 
         _ensure_service_area_columns()
         _ensure_team_support()
         _ensure_activity_columns()
@@ -102,7 +107,9 @@ def _ensure_user_columns():
         "id_no": "VARCHAR(50)",
         "segment": "VARCHAR(120)",
         "manager_id": "INTEGER REFERENCES users(id)",
-        "team_id": "INTEGER REFERENCES teams(id)"
+        "team_id": "INTEGER REFERENCES teams(id)",
+        "invite_code": "VARCHAR(20)",
+        "profile_photo": "VARCHAR(255)",
     }
 
     with db.engine.connect() as conn:
@@ -115,6 +122,26 @@ def _ensure_user_columns():
                 except Exception as e:
                     print(f"Column migration skipped/failed: {e}")
         conn.commit()
+
+
+def _backfill_invite_codes():
+    from models import generate_unique_invite_code
+    users_missing_code = User.query.filter(
+        (User.invite_code == None) | (User.invite_code == "")
+    ).all()
+    for u in users_missing_code:
+        u.invite_code = generate_unique_invite_code()
+    if users_missing_code:
+        db.session.commit()     
+
+def _ensure_invite_codes():
+    """Make sure every user has an invite code for each role they're allowed to invite."""
+    from models import ALLOWED_INVITE_ROLES, get_or_create_invite_code
+    for user in User.query.all():
+        for role in ALLOWED_INVITE_ROLES.get(user.role, []):
+            get_or_create_invite_code(user, role)
+
+
 def _ensure_service_area_columns():
     """
     Same safety net as _ensure_user_columns(), but for the service_areas
@@ -187,6 +214,7 @@ def _seed_default_admin():
         role="admin",
         is_approved=True,
         email_verified=True,
+        invite_code=generate_unique_invite_code(),
     )
     admin.set_password(default_password)
 
@@ -362,12 +390,18 @@ def _apply_form(a, form):
     a.service_area = form.service_area.data
     a.specific_activity = form.specific_activity.data
     a.description = form.description.data
-    a.where_location = form.where_location.data
+    if form.where_location.data == "Other":
+            custom_where = (request.form.get("custom_where_location") or "").strip()
+            a.where_location = custom_where if custom_where else "Other"
+    else:
+        a.where_location = form.where_location.data
     a.whom = form.whom.data
-    a.engagement_type = form.engagement_type.data
-    a.result_outcome = form.result_outcome.data
+    if form.engagement_type.data == "Other":
+        custom_engagement = (request.form.get("custom_engagement_type") or "").strip()
+        a.engagement_type = custom_engagement if custom_engagement else "Other"
+    else:
+        a.engagement_type = form.engagement_type.data
     a.financial_result = form.financial_result.data
-    a.future_plan = form.future_plan.data
     a.status = form.status.data
     a.responsible_org = form.responsible_org.data
     a.remarks = form.remarks.data
@@ -482,6 +516,8 @@ def register_routes(app: Flask):
                         staff_groups=staff_groups, staff_id=staff_id,
                         selected_staff=selected_staff)
 
+
+    
     @app.route("/activities/add", methods=["GET", "POST"])
     @login_required
     def activity_add():
@@ -663,7 +699,18 @@ def register_routes(app: Flask):
             filter_ids = [current_user.id]
 
         return filter_ids, selected_staff, view
-       
+    def activity_add():
+        form = ActivityForm()
+        if form.validate_on_submit():
+            ...
+        return render_template("activities/activity_form.html", form=form, title="Add Activity",
+                                current_fiscal_year=calc_fiscal_year(date.today()))
+
+        def activity_edit(activity_id):
+            ...
+            return render_template("activities/activity_form.html", form=form, title="Edit Activity",
+                                    activity=a, current_fiscal_year=calc_fiscal_year(date.today()))
+        
     
     @app.route("/activities/<int:activity_id>/document")
     @login_required
@@ -703,7 +750,12 @@ def register_routes(app: Flask):
         file_storage.save(os.path.join(app.config["UPLOAD_FOLDER"], saved_name))
         return saved_name, original_name
     def _apply_form(a: Activity, form: ActivityForm):
-        a.service_area = form.service_area.data
+        if form.service_area.data == "Other":
+            custom = (request.form.get("custom_service_area") or "").strip()
+            a.service_area = custom if custom else "Other"
+        else:
+            a.service_area = form.service_area.data
+
         a.specific_activity = form.specific_activity.data
         a.description = form.description.data
         a.where_location = form.where_location.data
