@@ -93,7 +93,7 @@
                 onclick="openActivityModal(JSON.parse(this.getAttribute('data-activity')))">View</button>
         &nbsp;
         <a href="{{ url_for('activity_edit', activity_id=a.id) }}">Edit</a>
-        {% if current_user.is_admin %}
+       {% if current_user.is_admin or (a.user_id == current_user.id and a.approval_status != "approved" and a.status != "Completed") %}
         &nbsp;
         <form method="post" action="{{ url_for('activity_delete', activity_id=a.id) }}"
               style="display:inline" onsubmit="return confirm('Delete this activity?');">

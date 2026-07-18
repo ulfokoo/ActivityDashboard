@@ -594,6 +594,15 @@ def register_routes(app: Flask):
             flash("Activity updated.", "success")
             return redirect(url_for("activity_list"))
         return render_template("activities/activity_form.html", form=form, title="Edit Activity", activity=a)
+    
+    
+    @app.route("/activities/<int:activity_id>/delete", methods=["POST"])
+    @login_required
+    def activity_delete(activity_id):
+        activity = Activity.query.get_or_404(activity_id)
+        db.session.delete(activity)
+        db.session.commit()
+        return redirect(url_for("activity_list"))
 
     @app.route("/activities/<int:activity_id>/request-closure", methods=["POST"])
     @login_required
