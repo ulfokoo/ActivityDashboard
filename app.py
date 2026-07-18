@@ -6,6 +6,7 @@ from datetime import date, datetime
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort, send_from_directory
 from flask_login import LoginManager, login_required, current_user
 from sqlalchemy import func, or_
+from sqlalchemy import inspect, text
 from models import calc_fiscal_year
 from datetime import date
 
@@ -77,6 +78,7 @@ def create_app():
         _ensure_user_columns()
         _backfill_invite_codes()
         _ensure_invite_codes() 
+        _ensure_schema()
         _ensure_service_area_columns()
         _ensure_team_support()
         _ensure_activity_columns()
@@ -87,6 +89,17 @@ def create_app():
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True) 
     register_routes(app)
     return app
+def _ensure_schema():
+    """Add any columns that exist in the models but not yet in the database.
+    Safe to run every startup — does nothing if columns already exist."""
+    inspector = inspect(db.engine)
+    existing_columns = {col["name"] for col in inspector.get_columns("activities")}
+
+    with db.engine.connect() as conn:
+        if "end_date" not in existing_columns:
+            conn.execute(text("ALTER TABLE activities ADD COLUMN end_date DATE"))
+            conn.commit()
+            print("✅ Added missing column: activities.end_date")
 
 def _ensure_user_columns():
     """
