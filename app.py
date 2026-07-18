@@ -594,15 +594,6 @@ def register_routes(app: Flask):
             flash("Activity updated.", "success")
             return redirect(url_for("activity_list"))
         return render_template("activities/activity_form.html", form=form, title="Edit Activity", activity=a)
-    
-    
-    @app.route("/activities/<int:activity_id>/delete", methods=["POST"])
-    @login_required
-    def activity_delete(activity_id):
-        activity = Activity.query.get_or_404(activity_id)
-        db.session.delete(activity)
-        db.session.commit()
-        return redirect(url_for("activity_list"))
 
     @app.route("/activities/<int:activity_id>/request-closure", methods=["POST"])
     @login_required
@@ -755,14 +746,20 @@ def register_routes(app: Flask):
     
     @app.route("/activities/<int:activity_id>/delete", methods=["POST"])
     @login_required
-    @admin_required
     def activity_delete(activity_id):
         a = Activity.query.get_or_404(activity_id)
+
+        is_owner = a.user_id == current_user.id
+        owner_can_delete = is_owner and a.approval_status != "approved" and a.status != "completed"
+
+        if not (current_user.is_admin or owner_can_delete):
+            abort(403)
+
         db.session.delete(a)
         db.session.commit()
         flash("Activity deleted.", "info")
         return redirect(url_for("activity_list"))
-    
+        
 
     
     def _save_uploaded_document(file_storage):
