@@ -6,7 +6,28 @@
 <form method="post" class="form-grid" novalidate enctype="multipart/form-data">
   {{ form.hidden_tag() }}
 
-<div>{{ form.date.label }} {{ form.date(type="date") }}</div>
+<div>{{ form.date.label }} {{ form.date(type="date", id="dateField") }}</div>
+<div>{{ form.date_to.label }} {{ form.date_to(type="date", id="dateToField") }}</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const dateField = document.getElementById('dateField');
+  const dateToField = document.getElementById('dateToField');
+
+  function syncMin() {
+    if (dateField.value) {
+      dateToField.min = dateField.value;
+      // If "To" is already set and now earlier than "From", clear it
+      if (dateToField.value && dateToField.value < dateField.value) {
+        dateToField.value = '';
+      }
+    }
+  }
+
+  dateField.addEventListener('change', syncMin);
+  syncMin(); // run once on load in case "Date" already has a value
+});
+</script>
   <div>
     {{ form.service_area.label }} {{ form.service_area(id="serviceAreaSelect") }}
   </div>

@@ -4,7 +4,7 @@ from wtforms import (
     StringField, TextAreaField, DateField, FloatField,
     SelectField, SubmitField, PasswordField, BooleanField,
 )
-from wtforms.validators import DataRequired, Optional, Length, Email, EqualTo
+from wtforms.validators import DataRequired, Optional, Length, Email, EqualTo,ValidationError
 
 import config
 from models import ServiceArea, visible_service_area_owner_ids, db
@@ -71,6 +71,7 @@ class ResetPasswordForm(FlaskForm):
 
 class ActivityForm(FlaskForm):
     date = DateField("Date", validators=[DataRequired()], default=_date.today)
+    date_to = DateField("To (optional, if this activity spans more than one day)", validators=[Optional()])
 
     service_area = SelectField("Service Area", validators=[DataRequired()])
 
@@ -115,6 +116,10 @@ class ActivityForm(FlaskForm):
     remarks = TextAreaField("Remarks", validators=[Optional()])
 
     submit = SubmitField("Save Activity")
+    
+    def validate_date_to(self, field):
+        if field.data and self.date.data and field.data < self.date.data:
+            raise ValidationError("End date can't be before the start date.")
 
 
 class TargetForm(FlaskForm):

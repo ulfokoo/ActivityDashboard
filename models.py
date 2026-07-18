@@ -202,6 +202,8 @@ class Activity(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=True)
+
 
     # Auto-calculated columns (stored for fast filtering/dashboard queries,
     # recomputed automatically in __init__ / set_date whenever date changes)
@@ -235,7 +237,7 @@ class Activity(db.Model):
     # link to user
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     user = db.relationship("User", foreign_keys=[user_id], backref="activities")
-
+    
    
 
     def set_date(self, d: date):
@@ -248,6 +250,27 @@ class Activity(db.Model):
         self.quarter = calc_quarter(d)
         self.year = d.year
         self.fiscal_year = calc_fiscal_year(d)
+
+
+    def set_date(self, d: date):
+        """Set the date and refresh every auto-calculated column, exactly
+        like the Excel formulas used to do when you typed a new date."""
+        self.date = d
+        self.day = calc_day(d)
+        self.week = calc_week(d)
+        self.month = calc_month(d)
+        self.quarter = calc_quarter(d)
+        self.year = d.year
+        self.fiscal_year = calc_fiscal_year(d)
+
+    @property
+    def date_range_display(self):
+        if self.end_date and self.end_date != self.date:
+            return f"{self.date.strftime('%d %b %Y')} – {self.end_date.strftime('%d %b %Y')}"
+        return self.date.strftime('%d %b %Y')    
+    
+
+
 
 
 class Target(db.Model):

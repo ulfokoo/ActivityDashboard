@@ -48,7 +48,7 @@
   <tbody>
     {% for a in activities %}
     <tr>
-      <td>{{ a.date.strftime('%d %b %Y') }}</td>
+      <td>{{ a.date_range_display }}</td>
       <td>{{ a.day }}</td>
       <td>{{ a.user.full_name if a.user else "—" }}</td>
       <td>{{ a.week }}</td>

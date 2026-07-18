@@ -525,6 +525,7 @@ def register_routes(app: Flask):
         if form.validate_on_submit():
             a = Activity()
             a.set_date(form.date.data)
+            a.end_date = form.date_to.data or None
             _apply_form(a, form)
             saved_name, original_name = _save_uploaded_document(form.document.data)
             if saved_name:
@@ -536,6 +537,9 @@ def register_routes(app: Flask):
             flash("Activity added.", "success")
             return redirect(url_for("activity_list"))
         return render_template("activities/activity_form.html", form=form, title="Add Activity")
+    
+    
+
     
     @app.route("/activities/<int:activity_id>/approve", methods=["POST"])
     @login_required
